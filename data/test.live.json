@@ -1,0 +1,23 @@
+{
+  "updatedAt": "2026-05-07T03:05:16.893790+00:00",
+  "items": [
+    {
+      "id": "https://example.com/b",
+      "title": "Wall Street futures slip ahead of payrolls data",
+      "titleKo": "",
+      "publishedAt": "2026-05-07T02:00:00+00:00",
+      "source": "Sample",
+      "category": "Macro",
+      "url": "https://example.com/b"
+    },
+    {
+      "id": "https://example.com/a",
+      "title": "Treasury yields rise as traders reassess Fed path",
+      "titleKo": "",
+      "publishedAt": "2026-05-07T01:00:00+00:00",
+      "source": "Sample",
+      "category": "Markets",
+      "url": "https://example.com/a"
+    }
+  ]
+}

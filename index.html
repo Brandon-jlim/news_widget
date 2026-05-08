@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>미국 증시 뉴스 오버레이</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="js/config.js"></script>
+    <script defer src="js/news-source.js"></script>
+    <script defer src="js/app.js"></script>
+  </head>
+  <body>
+    <main class="overlay-shell">
+      <section class="news-widget" id="news-widget" data-status="loading" aria-live="polite">
+        <header class="widget-header">
+          <div>
+            <p class="eyebrow">LIVE OVERLAY</p>
+            <h1 class="widget-title" id="widget-title">미국 증시 뉴스</h1>
+          </div>
+          <div class="status-badge" id="status-badge">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="status-text">불러오는 중</span>
+          </div>
+        </header>
+
+        <div class="cards" id="news-list">
+          <article class="news-card skeleton-card" aria-hidden="true">
+            <div class="news-card__meta skeleton-line"></div>
+            <div class="news-card__title skeleton-block"></div>
+            <div class="news-card__title skeleton-block short"></div>
+          </article>
+          <article class="news-card skeleton-card" aria-hidden="true">
+            <div class="news-card__meta skeleton-line"></div>
+            <div class="news-card__title skeleton-block"></div>
+            <div class="news-card__title skeleton-block short"></div>
+          </article>
+          <article class="news-card skeleton-card" aria-hidden="true">
+            <div class="news-card__meta skeleton-line"></div>
+            <div class="news-card__title skeleton-block"></div>
+            <div class="news-card__title skeleton-block short"></div>
+          </article>
+        </div>
+
+        <footer class="widget-footer">
+          <span id="footer-text">피드 연결 확인 중…</span>
+        </footer>
+      </section>
+    </main>
+  </body>
+</html>

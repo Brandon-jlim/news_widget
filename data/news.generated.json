@@ -1,0 +1,21 @@
+{
+  "updatedAt": "2026-04-29T04:03:43.260829+00:00",
+  "items": [
+    {
+      "id": "item-1",
+      "title": "US futures edge higher ahead of earnings",
+      "publishedAt": "2026-04-28T23:10:00+00:00",
+      "source": "Sample Market Feed",
+      "category": "Premarket",
+      "url": "https://example.com/item-1"
+    },
+    {
+      "id": "item-2",
+      "title": "Bond yields and dollar stay in focus",
+      "publishedAt": "2026-04-28T22:40:00+00:00",
+      "source": "Sample Market Feed",
+      "category": "Macro",
+      "url": "https://example.com/item-2"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sample Finance Feed</title>
+    <item>
+      <title>미국 증시 선물 상승, 대형 기술주 실적 대기</title>
+      <link>https://example.com/news/1</link>
+      <guid>sample-1</guid>
+      <pubDate>Wed, 29 Apr 2026 11:20:00 GMT</pubDate>
+      <category>프리마켓</category>
+    </item>
+    <item>
+      <title>국채 금리와 달러 움직임에 성장주 민감도 확대</title>
+      <link>https://example.com/news/2</link>
+      <guid>sample-2</guid>
+      <pubDate>Wed, 29 Apr 2026 11:10:00 GMT</pubDate>
+      <category>매크로</category>
+    </item>
+  </channel>
+</rss>
