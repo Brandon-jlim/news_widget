@@ -16,5 +16,18 @@ window.NEWS_WIDGET_CONFIG = {
     label: 'Live Feed',
     keepStaleOnError: true,
   },
+
+  sentiment: {
+    enabled: true,
+    positiveLabel: '호재',
+    negativeLabel: '악재',
+    neutralLabel: '중립',
+  },
+  pinning: {
+    enabled: true,
+    storageKey: 'news-overlay-widget.pins.v1',
+    maxPinned: 10,
+    startInEditMode: false,
+  },
   debug: false,
 };

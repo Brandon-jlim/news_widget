@@ -1,90 +1,59 @@
-# News Overlay Widget
+# 뉴스 오버레이 위젯 실행 가이드
 
-방송용 소형 뉴스 오버레이 위젯입니다.
+## 1. 키 파일 준비
+프로젝트 루트에 아래 파일을 만듭니다.
 
-## 핵심 구조
-
-- `index.html` / `styles.css` / `js/*.js` : OBS Browser Source로 띄우는 프런트
-- `data/news.live.json` : 프런트가 읽는 정규화 JSON
-- `tools/news_relay.py` : 허용된 RSS / JSON 뉴스 API를 `data/news.live.json`으로 변환
-
-## 빠른 실행
-
-```bash
-cd news-overlay-widget
-python -m http.server 8787
+```text
+keys/marketaux_token.txt
+keys/deepl_api_key.txt
 ```
 
-브라우저 또는 OBS Browser Source URL:
+각 파일에는 키 한 줄만 넣으면 됩니다.
 
+```text
+N32E...your_marketaux_token...
+```
+
+```text
+xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx
+```
+
+## 2. DeepL 키 확인
+```bash
+python3 tools/check_deepl.py
+```
+
+## 3. 한 번에 실행
+```bash
+python3 tools/run_overlay.py --debug
+```
+
+또는
+
+```bash
+./run_overlay.sh --debug
+```
+
+기본 동작:
+- marketaux broad 모드
+- 미국 뉴스 기준
+- 45초마다 갱신
+- DeepL 한국어 번역
+- http://127.0.0.1:8787/ 에 서버 실행
+
+## 4. 브라우저/OBS 확인
+브라우저:
 ```text
 http://127.0.0.1:8787/
 ```
 
-## 실제 데이터 연결
-
-### 1) RSS 사용
-
-```bash
-python tools/news_relay.py \
-  --provider rss \
-  --rss "https://example.com/feed.xml" \
-  --out data/news.live.json \
-  --limit 5 \
-  --watch 60
+편집 모드:
+```text
+http://127.0.0.1:8787/?edit=1
 ```
 
-### 2) GNews 사용
-
-```bash
-export GNEWS_API_KEY="YOUR_KEY"
-python tools/news_relay.py \
-  --provider gnews \
-  --query "US stocks OR Wall Street OR Nasdaq OR S&P 500" \
-  --lang en \
-  --country us \
-  --out data/news.live.json \
-  --limit 5 \
-  --watch 30
-```
-
-### 3) marketaux 사용
-
-```bash
-export MARKETAUX_API_TOKEN="YOUR_KEY"
-python tools/news_relay.py \
-  --provider marketaux \
-  --marketaux-mode broad \
-  --countries us \
-  --lang en \
-  --fetch-limit 20 \
-  --limit 5 \
-  --watch 45 \
-  --use-preferred-domains \
-  --out data/news.live.json \
-  --debug
-```
-
-## 한국어 헤드라인 번역: Amazon Translate 추천
-
-이 프로젝트는 `Amazon Translate`를 바로 붙일 수 있게 되어 있습니다.
-
-### 왜 Amazon Translate를 붙였나
-
-- 금융 용어를 강제로 맞출 수 있는 `custom terminology` 지원
-- 한국어 대상 `formality` 지원
-- 비용이 낮고 종량제가 단순함
-- 캐시 + 로컬 용어 치환만으로 방송용 제목 품질을 꽤 안정적으로 만들 수 있음
-
-### 준비
-
-1. AWS 계정 생성
-2. `Amazon Translate` 사용 가능한 리전 선택
-3. `aws configure` 또는 환경변수로 자격 증명 설정
-4. 필요하면 AWS 콘솔에서 custom terminology 생성
-
-### 실행 예시
-
+## 5. 개별 실행
+### 뉴스 수집만
 ```bash
 python3 tools/news_relay.py \
   --provider marketaux \
@@ -93,61 +62,50 @@ python3 tools/news_relay.py \
   --lang en \
   --fetch-limit 20 \
   --limit 5 \
-  --watch 45 \
   --use-preferred-domains \
-  --translate-provider amazon \
+  --translate-provider deepl \
   --translate-target ko \
   --translate-source en \
   --translate-cache data/translate_cache.ko.json \
   --translate-terms-file tools/ko_terms.sample.json \
-  --aws-region us-east-1 \
   --out data/news.live.json \
+  --timeout 20 \
+  --request-retries 2 \
+  --retry-backoff 1.5 \
+  --watch 45 \
   --debug
 ```
 
-AWS CLI 프로필을 쓰고 싶으면:
-
+### 서버만
 ```bash
-python3 tools/news_relay.py \
-  --provider marketaux \
-  --marketaux-mode broad \
-  --countries us \
-  --lang en \
-  --fetch-limit 20 \
-  --limit 5 \
-  --watch 45 \
-  --use-preferred-domains \
-  --translate-provider amazon \
-  --aws-profile default \
-  --aws-region us-east-1 \
-  --out data/news.live.json
+python3 -m http.server 8787 --bind 127.0.0.1 --directory .
 ```
 
-### 용어집 후처리
-
-`tools/ko_terms.sample.json` 에서 로컬 치환 규칙을 관리합니다.
-
-예:
-
-```json
-{
-  "연방준비제도": "연준",
-  "미국 국채 수익률": "미 국채금리",
-  "월스트리트": "월가"
-}
+## 6. 자주 쓰는 옵션
+포트 변경:
+```bash
+python3 tools/run_overlay.py --port 8888
 ```
 
-이 파일은 Amazon Translate 결과에 후처리로 적용됩니다.
+브라우저 자동 열기:
+```bash
+python3 tools/run_overlay.py --open-browser
+```
 
-## 클릭으로 원문 열기
+도메인 필터 끄기:
+```bash
+python3 tools/run_overlay.py --no-use-preferred-domains
+```
 
-- 카드 또는 제목 링크 클릭 시 `window.open()`으로 원문 URL을 새 탭/새 창으로 시도합니다.
-- 일반 브라우저에서는 바로 동작합니다.
-- OBS 내부에서는 브라우저 소스를 우클릭하고 **Interact** 창에서 눌러 테스트하는 방식이 가장 안전합니다.
+갱신 주기 변경:
+```bash
+python3 tools/run_overlay.py --watch 60
+```
 
-## 참고
 
-- `data/translate_cache.ko.json` 으로 같은 영어 헤드라인 재번역을 줄입니다.
-- `--no-translate-brevity` 옵션이 있지만, Amazon brevity는 영어→한국어 조합에서는 적용되지 않습니다.
-- `--aws-terminology-name` 으로 AWS custom terminology를 연결할 수 있습니다.
-- Reuters/LSEG 같은 라이선스형 소스를 쓰려면 허용된 RSS 또는 API 계약을 사용하고, 그 결과를 이 프로젝트의 JSON 형식으로 정규화해서 연결하세요.
+## 추가 기능: 호재/악재/중립 표시
+
+- 각 카드 메타의 맨 앞에 `호재 / 악재 / 중립` 칩이 표시됩니다.
+- 기본 색상은 `호재=초록`, `악재=빨강`, `중립=회색`입니다.
+- 위젯은 `item.sentiment` 값을 우선 사용하고, 값이 없으면 제목 키워드로 간단히 추정합니다.
+- relay 스크립트는 marketaux 기사 정규화 시 `sentiment` 필드를 함께 저장합니다.

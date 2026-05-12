@@ -5,82 +5,107 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import socket
 import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-try:
-    import boto3
-    from botocore.exceptions import BotoCoreError, ClientError
-except Exception:  # noqa: BLE001
-    boto3 = None
-    BotoCoreError = Exception
-    ClientError = Exception
-
-from rss_to_json import clean_text, parse_feed, read_source
 
 USER_AGENT = "NewsOverlayWidget/0.8"
-DEFAULT_BROAD_MARKET_QUERY = (
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_KEYS_DIR = PROJECT_ROOT / "keys"
+DEFAULT_MARKETAUX_KEY_FILES = (
+    DEFAULT_KEYS_DIR / "marketaux_token.txt",
+    DEFAULT_KEYS_DIR / "marketaux.txt",
+)
+DEFAULT_DEEPL_KEY_FILES = (
+    DEFAULT_KEYS_DIR / "deepl_api_key.txt",
+    DEFAULT_KEYS_DIR / "deepl_key.txt",
+    DEFAULT_KEYS_DIR / "deepl.txt",
+)
+
+DEFAULT_BROAD_SEARCH = (
     '"federal reserve" | fed | fomc | powell | inflation | cpi | pce | '
     '"nonfarm payrolls" | payrolls | unemployment | jobs | gdp | recession | '
-    'treasury | yields | "bond yields" | "10-year" | "2-year" | '
-    'oil | crude | opec | tariffs | sanctions | geopolitics | '
-    '"china stimulus" | "consumer confidence" | pmi | "retail sales" | '
-    '"u.s. stocks" | "wall street" | nasdaq | "s&p 500" | dow'
+    'treasury | yields | "bond yields" | "10-year" | "2-year" | oil | crude | opec | '
+    'tariffs | sanctions | geopolitics | "china stimulus" | "consumer confidence" | '
+    'pmi | "retail sales" | "u.s. stocks" | "wall street" | nasdaq | "s&p 500" | dow'
 )
-PREFERRED_BROAD_DOMAINS = [
-    "reuters.com",
-    "bloomberg.com",
-    "wsj.com",
-    "cnbc.com",
-    "ft.com",
-    "marketwatch.com",
-    "investing.com",
-    "finance.yahoo.com",
+
+DEFAULT_PREFERRED_DOMAINS = ",".join(
+    [
+        "reuters.com",
+        "bloomberg.com",
+        "wsj.com",
+        "cnbc.com",
+        "ft.com",
+        "marketwatch.com",
+        "investing.com",
+        "finance.yahoo.com",
+    ]
+)
+
+INDEX_SYMBOLS = {"SPY", "QQQ", "DIA", "IWM", "VIX", "TLT", "USO", "GLD"}
+BROAD_ENTITY_TYPES = {"country", "currency", "commodity", "etf", "index", "macro"}
+
+DEFAULT_DEEPL_INSTRUCTIONS = [
+    "Translate into concise, natural Korean financial-news headline style.",
+    "Prefer familiar Korean market terms such as 연준, 미 국채금리, 월가, S&P 500, 나스닥.",
+    "Avoid honorifics, keep the meaning faithful, and make the headline readable in a small broadcast overlay.",
 ]
-INDEX_SYMBOLS = {"SPY", "QQQ", "DIA", "IWM", "VIX", "ES", "NQ", "YM", "SPX", "NDX", "DJI", "RUT"}
-BROAD_ENTITY_TYPES = {"index", "etf", "commodity", "currency", "bond", "macro"}
 
-MACRO_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "연준": ("federal reserve", "fed", "fomc", "powell", "rate cut", "rate hike", "interest rate"),
-    "물가": ("inflation", "cpi", "pce", "ppi", "prices"),
-    "고용": ("payrolls", "nonfarm payrolls", "jobs", "jobless", "unemployment"),
-    "국채금리": ("treasury", "bond yields", "10-year", "2-year", "yield"),
-    "원유": ("oil", "crude", "opec", "brent", "wti"),
-    "지정학": ("geopolitics", "sanctions", "tariffs", "war", "middle east", "china stimulus"),
-    "지수": ("wall street", "u.s. stocks", "stock market", "s&p 500", "nasdaq", "dow"),
-    "경기": ("gdp", "recession", "retail sales", "consumer confidence", "pmi"),
+DEFAULT_KO_REPLACEMENTS = {
+    "연방준비제도이사회": "연준",
+    "연방준비제도": "연준",
+    "미국 연방준비제도": "연준",
+    "미국 국채 수익률": "미 국채금리",
+    "국채 수익률": "국채금리",
+    "10년 만기 국채 수익률": "10년물 국채금리",
+    "2년 만기 국채 수익률": "2년물 국채금리",
+    "미국 주식시장": "미국 증시",
+    "미국 주식": "미국 증시",
+    "월스트리트": "월가",
+    "석유수출국기구": "OPEC",
+    "서부텍사스산원유": "WTI",
+    "연방공개시장위원회": "FOMC",
 }
-SOURCE_BOOSTS = {
-    "reuters": 2.5,
-    "bloomberg": 2.3,
-    "wall street journal": 1.8,
-    "wsj": 1.8,
-    "cnbc": 1.4,
-    "financial times": 1.6,
-    "marketwatch": 1.1,
+
+CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "연준": ("federal reserve", "fed", "fomc", "powell"),
+    "물가": ("inflation", "cpi", "pce", "ppi"),
+    "고용": ("payroll", "jobs", "unemployment", "labor market", "employment"),
+    "채권": ("treasury", "yield", "bond", "10-year", "2-year"),
+    "원유": ("oil", "crude", "wti", "brent", "opec"),
+    "지정학": ("tariff", "sanction", "war", "ceasefire", "geopolit", "iran", "china"),
+    "지수": ("s&p 500", "nasdaq", "dow", "u.s. stocks", "wall street", "futures"),
 }
-STOCK_NOISE_HINTS = (
-    "price target",
-    "analyst",
-    "upgrades",
-    "downgrades",
-    "insider",
-    "options",
-    "dividend",
-    "buyback",
+
+SENTIMENT_POSITIVE_TERMS = (
+    "rally", "rallies", "gain", "gains", "advance", "advances", "rebound", "rebounds", "rise", "rises",
+    "record high", "record highs", "optimism", "optimistic", "boost", "beats", "beat", "ceasefire",
+    "peace hopes", "progress", "rate cuts", "cooling inflation", "easing", "soft landing", "stimulus",
 )
 
+SENTIMENT_NEGATIVE_TERMS = (
+    "selloff", "falls", "fall", "slump", "slumps", "drop", "drops", "decline", "declines", "crash",
+    "concern", "concerns", "worry", "worries", "fear", "fears", "hawkish", "hot inflation",
+    "sticky inflation", "war", "tariff", "tariffs", "sanction", "sanctions", "volatility", "uncertainty",
+    "recession", "teeter", "tension", "tensions",
+)
 
-@dataclass
-class JsonResponse:
-    payload: dict[str, Any]
-    headers: dict[str, str]
+SENTIMENT_UP_WORDS = ("rise", "rises", "rose", "up", "jump", "jumps", "surge", "surges", "spike", "spikes")
+SENTIMENT_DOWN_WORDS = ("fall", "falls", "fell", "down", "drop", "drops", "slip", "slips", "easing", "ease", "eases", "cool", "cools", "cooling")
+
+
+class RelayError(RuntimeError):
+    pass
 
 
 @dataclass
@@ -90,11 +115,106 @@ class ProviderResult:
 
 
 @dataclass
-class UsageHeaders:
-    daily_limit: str = ""
-    daily_remaining: str = ""
-    rate_limit: str = ""
-    rate_remaining: str = ""
+class HttpResponse:
+    payload: dict[str, Any]
+    headers: dict[str, str]
+
+
+@dataclass
+class TranslationResult:
+    text: str
+    provider: str
+    from_cache: bool
+    billed_characters: int = 0
+
+
+class Translator:
+    provider_name = "none"
+
+    def translate_item(self, item: dict[str, Any], args: argparse.Namespace) -> TranslationResult:
+        raise NotImplementedError
+
+
+class NullTranslator(Translator):
+    provider_name = "none"
+
+    def translate_item(self, item: dict[str, Any], args: argparse.Namespace) -> TranslationResult:
+        return TranslationResult(
+            text=clean_text(item.get("titleKo") or item.get("title") or ""),
+            provider=self.provider_name,
+            from_cache=True,
+        )
+
+
+class DeepLTranslator(Translator):
+    provider_name = "deepl"
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        api_key = clean_text(
+            args.deepl_api_key
+            or args.translate_api_key
+            or args.file_deepl_api_key
+            or args.env_deepl_api_key
+        )
+        if not api_key:
+            raise RelayError("DeepL 번역을 사용하려면 keys/deepl_api_key.txt 또는 --deepl-api-key 가 필요합니다.")
+
+        self.api_key = api_key
+        self.timeout = args.timeout
+        self.source_lang = clean_text(args.translate_source).upper() or None
+        self.target_lang = clean_text(args.translate_target).upper() or "KO"
+        self.glossary_id = clean_text(args.deepl_glossary_id)
+        self.custom_instructions = build_custom_instructions(args)
+        self.base_url = clean_text(args.deepl_api_url) or (
+            "https://api-free.deepl.com" if api_key.endswith(":fx") else "https://api.deepl.com"
+        )
+
+    def translate_item(self, item: dict[str, Any], args: argparse.Namespace) -> TranslationResult:
+        title = clean_text(item.get("title"))
+        if not title:
+            return TranslationResult(text="", provider=self.provider_name, from_cache=True)
+
+        payload: dict[str, Any] = {
+            "text": [title],
+            "target_lang": self.target_lang,
+            "model_type": "quality_optimized",
+            "show_billed_characters": True,
+        }
+        if self.source_lang:
+            payload["source_lang"] = self.source_lang
+        if self.glossary_id and self.source_lang:
+            payload["glossary_id"] = self.glossary_id
+
+        context = build_translation_context(item, max_chars=args.translate_context_chars)
+        if context:
+            payload["context"] = context
+        if self.custom_instructions:
+            payload["custom_instructions"] = self.custom_instructions
+
+        response = request_json(
+            f"{self.base_url}/v2/translate",
+            timeout=self.timeout,
+            method="POST",
+            headers={
+                "Authorization": f"DeepL-Auth-Key {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            retries=args.request_retries,
+            retry_backoff=args.retry_backoff,
+            debug=args.debug,
+        )
+
+        translations = response.payload.get("translations") or []
+        if not translations:
+            raise RelayError("DeepL 응답에 translations 가 없습니다.")
+
+        translated = clean_text((translations[0] or {}).get("text"))
+        if not translated:
+            raise RelayError("DeepL 응답의 번역문이 비어 있습니다.")
+
+        billed = int((translations[0] or {}).get("billed_characters") or response.payload.get("billed_characters") or 0)
+        return TranslationResult(text=translated, provider=self.provider_name, from_cache=False, billed_characters=billed)
 
 
 class Provider:
@@ -102,202 +222,154 @@ class Provider:
         raise NotImplementedError
 
 
-class HeadlineTranslator:
-    def translate_item(self, item: dict[str, Any], args: argparse.Namespace) -> str:
-        raise NotImplementedError
-
-
-class AmazonHeadlineTranslator(HeadlineTranslator):
-    def __init__(self, args: argparse.Namespace):
-        if boto3 is None:
-            raise RuntimeError("Amazon Translate를 사용하려면 boto3가 필요합니다. pip install boto3")
-        session_kwargs: dict[str, Any] = {}
-        if args.aws_profile:
-            session_kwargs["profile_name"] = args.aws_profile
-        session = boto3.Session(**session_kwargs)
-        self.client = session.client("translate", region_name=args.aws_region)
-        self.args = args
-
-    def translate_item(self, item: dict[str, Any], args: argparse.Namespace) -> str:
-        title = clean_text(item.get("title"))
-        if not title:
-            return ""
-        request: dict[str, Any] = {
-            "Text": title,
-            "SourceLanguageCode": args.translate_source,
-            "TargetLanguageCode": args.translate_target,
-        }
-        settings: dict[str, str] = {}
-        if args.translate_formality:
-            settings["Formality"] = args.translate_formality
-        if args.translate_brevity and brevity_supported(args.translate_source, args.translate_target):
-            settings["Brevity"] = "ON"
-        if settings:
-            request["Settings"] = settings
-        if args.aws_terminology_name:
-            request["TerminologyNames"] = [args.aws_terminology_name]
-
-        try:
-            response = self.client.translate_text(**request)
-        except (BotoCoreError, ClientError) as exc:
-            raise RuntimeError(f"Amazon Translate 요청 실패: {exc}") from exc
-        return clean_text(response.get("TranslatedText"))
-
-
-class RSSProvider(Provider):
-    def fetch(self, args: argparse.Namespace) -> ProviderResult:
-        items: list[dict[str, Any]] = []
-        if not args.rss:
-            raise ValueError("RSS provider를 사용할 때는 --rss 를 한 번 이상 지정해야 합니다.")
-
-        for source in args.rss:
-            xml_bytes = read_source(source, timeout=args.timeout)
-            feed_items = parse_feed(xml_bytes, source)
-            for item in feed_items:
-                title = clean_text(item.get("title"))
-                if not title:
-                    continue
-                items.append(
-                    {
-                        "id": clean_text(item.get("id") or item.get("url") or title),
-                        "title": title,
-                        "titleKo": title if args.assume_ko else "",
-                        "publishedAt": clean_text(item.get("publishedAt")),
-                        "source": clean_text(item.get("source") or args.provider_label or "RSS"),
-                        "category": clean_text(item.get("category") or args.category_label),
-                        "url": clean_text(item.get("url")),
-                        "snippet": "",
-                        "entities": [],
-                    }
-                )
-        return ProviderResult(items=items, meta={})
-
-
-class GNewsProvider(Provider):
-    BASE_SEARCH = "https://gnews.io/api/v4/search"
-    BASE_TOP = "https://gnews.io/api/v4/top-headlines"
-
-    def fetch(self, args: argparse.Namespace) -> ProviderResult:
-        api_key = args.api_key or args.env_gnews_api_key
-        if not api_key:
-            raise ValueError("GNews provider를 사용할 때는 --api-key 또는 GNEWS_API_KEY 환경변수가 필요합니다.")
-
-        params: dict[str, Any] = {
-            "apikey": api_key,
-            "max": args.fetch_limit or args.limit,
-            "lang": args.lang,
-        }
-        if args.country:
-            params["country"] = args.country
-        if args.from_iso:
-            params["from"] = args.from_iso
-        if args.to_iso:
-            params["to"] = args.to_iso
-
-        if args.query:
-            params["q"] = args.query
-            params["sortby"] = "publishedAt"
-            url = f"{self.BASE_SEARCH}?{urlencode(params)}"
-        else:
-            if args.category:
-                params["category"] = args.category
-            url = f"{self.BASE_TOP}?{urlencode(params)}"
-
-        response = request_json(url, timeout=args.timeout)
-        articles = response.payload.get("articles") or []
-        items: list[dict[str, Any]] = []
-        for article in articles:
-            title = clean_text(article.get("title"))
-            if not title:
-                continue
-            lang = clean_text(article.get("lang") or args.lang)
-            source = article.get("source") or {}
-            items.append(
-                {
-                    "id": clean_text(article.get("id") or article.get("url") or title),
-                    "title": title,
-                    "titleKo": title if lang == "ko" else "",
-                    "publishedAt": clean_text(article.get("publishedAt")),
-                    "source": clean_text(source.get("name") or args.provider_label or "GNews"),
-                    "category": clean_text(args.category_label or args.category or args.query or ""),
-                    "url": clean_text(article.get("url")),
-                    "snippet": clean_text(article.get("description") or article.get("content") or ""),
-                    "entities": [],
-                }
-            )
-        return ProviderResult(items=items, meta={})
-
-
 class MarketauxProvider(Provider):
     BASE = "https://api.marketaux.com/v1/news/all"
 
     def fetch(self, args: argparse.Namespace) -> ProviderResult:
-        api_token = args.api_key or args.env_marketaux_api_token
+        api_token = clean_text(args.api_key or args.file_marketaux_api_token or args.env_marketaux_api_token)
         if not api_token:
-            raise ValueError("marketaux provider를 사용할 때는 --api-key 또는 MARKETAUX_API_TOKEN 환경변수가 필요합니다.")
+            raise RelayError("marketaux 를 사용하려면 keys/marketaux_token.txt 또는 --api-key 가 필요합니다.")
 
+        search_query = build_marketaux_query(args)
         params: dict[str, Any] = {
             "api_token": api_token,
-            "limit": min(max(args.fetch_limit or args.limit, 1), 50),
-            "language": args.lang or "en",
-            "countries": args.countries or "us",
+            "limit": min(max(args.fetch_limit, 1), 50),
+            "language": clean_text(args.lang or "en"),
+            "countries": clean_text(args.countries),
             "must_have_entities": as_bool_param(args.must_have_entities),
             "group_similar": as_bool_param(args.group_similar),
             "filter_entities": as_bool_param(args.filter_entities),
+            "published_after": clean_text(args.published_after),
         }
-        search_query = build_marketaux_query(args)
         if search_query:
             params["search"] = search_query
-        if args.symbols:
-            params["symbols"] = args.symbols
-        if args.industries:
-            params["industries"] = args.industries
         if args.domains:
-            params["domains"] = args.domains
-        elif args.use_preferred_domains and args.marketaux_mode == "broad":
-            params["domains"] = ",".join(PREFERRED_BROAD_DOMAINS)
-        if args.source_ids:
-            params["source_ids"] = args.source_ids
-        if args.published_after:
-            params["published_after"] = args.published_after
+            params["domains"] = clean_text(args.domains)
         if args.sort:
-            params["sort"] = args.sort
-        elif search_query:
-            params["sort"] = "relevance_score"
+            params["sort"] = clean_text(args.sort)
 
-        url = f"{self.BASE}?{urlencode(params)}"
-        response = request_json(url, timeout=args.timeout)
-        articles = response.payload.get("data") or []
-        meta = response.payload.get("meta") or {}
-        usage = parse_marketaux_usage_headers(response.headers)
+        request_url = f"{self.BASE}?{urlencode({k: v for k, v in params.items() if v != ''})}"
         if args.debug:
-            print("[news_relay][debug] marketaux request_url=", url)
-            print("[news_relay][debug] marketaux meta=", json.dumps(meta, ensure_ascii=False))
-            print("[news_relay][debug] marketaux raw_count=", len(articles))
-            for idx, article in enumerate(articles[:5], start=1):
-                print(f"[news_relay][debug] raw {idx}. {clean_text(article.get('title'))} | {clean_text(article.get('source'))}")
+            print(f"[news_relay][debug] marketaux request_url= {request_url}")
+
+        response = request_json(
+            request_url,
+            timeout=args.timeout,
+            retries=args.request_retries,
+            retry_backoff=args.retry_backoff,
+            debug=args.debug,
+        )
+        meta = response.payload.get("meta") or {}
+        raw_items = response.payload.get("data") or []
+
+        if args.debug:
+            print(f"[news_relay][debug] marketaux meta= {json.dumps(meta, ensure_ascii=False)}")
+            print(f"[news_relay][debug] marketaux raw_count= {len(raw_items)}")
+            for index, article in enumerate(raw_items[:5], start=1):
+                print(
+                    f"[news_relay][debug] raw {index}. {clean_text(article.get('title'))} | {clean_text(article.get('source'))}"
+                )
+
         items: list[dict[str, Any]] = []
-        for article in articles:
-            title = clean_text(article.get("title"))
-            if not title:
-                continue
-            lang = clean_text(article.get("language") or args.lang)
-            entities = article.get("entities") or []
-            category = derive_category(article, args)
-            item = {
-                "id": clean_text(article.get("uuid") or article.get("url") or title),
-                "title": title,
-                "titleKo": title if lang == "ko" else "",
-                "publishedAt": clean_text(article.get("published_at")),
-                "source": clean_text(article.get("source") or args.provider_label or "marketaux"),
-                "category": category,
-                "url": clean_text(article.get("url")),
-                "snippet": clean_text(article.get("description") or article.get("snippet") or ""),
-                "entities": entities,
-            }
-            item["_score"] = score_marketaux_item(item)
-            items.append(item)
-        return ProviderResult(items=items, meta={"usage": usage.__dict__, "request_url": url})
+        for article in raw_items:
+            normalized = self.normalize_article(article, args)
+            if normalized:
+                items.append(normalized)
+
+        usage = extract_usage_headers(response.headers)
+        return ProviderResult(
+            items=items,
+            meta={
+                "usage": usage,
+                "found": meta.get("found"),
+                "returned": meta.get("returned"),
+                "limit": meta.get("limit"),
+                "page": meta.get("page"),
+                "search": search_query,
+            },
+        )
+
+    def normalize_article(self, article: dict[str, Any], args: argparse.Namespace) -> dict[str, Any] | None:
+        title = clean_text(article.get("title"))
+        if not title:
+            return None
+        snippet = clean_text(article.get("snippet") or article.get("description") or "")
+        entities = article.get("entities") or []
+        score = score_article(article)
+        return {
+            "id": clean_text(article.get("uuid") or article.get("url") or title),
+            "title": title,
+            "titleKo": "",
+            "publishedAt": clean_text(article.get("published_at")),
+            "source": clean_text(article.get("source") or args.provider_label or "marketaux"),
+            "category": clean_text(args.category_label) or categorize_article(title, snippet, entities),
+            "sentiment": classify_market_sentiment(title, snippet, entities),
+            "url": clean_text(article.get("url")),
+            "description": clean_text(article.get("description")),
+            "snippet": snippet,
+            "entities": entities,
+            "_score": score,
+        }
+
+
+def clean_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+def resolve_path(path_text: str | Path) -> Path:
+    path = Path(path_text)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+def extract_secret_from_text(text: str) -> str:
+    for raw_line in text.splitlines():
+        line = raw_line.strip().lstrip("\ufeff")
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            _, value = line.split("=", 1)
+            candidate = value.strip().strip('"').strip("'")
+            if candidate:
+                return candidate
+        else:
+            return line.strip().strip('"').strip("'")
+    return clean_text(text)
+
+
+def load_secret_from_file(path_text: str | Path | None) -> tuple[str, str]:
+    if not path_text:
+        return "", ""
+    path = resolve_path(path_text)
+    if not path.exists() or not path.is_file():
+        return "", ""
+    try:
+        value = extract_secret_from_text(path.read_text(encoding="utf-8"))
+    except OSError:
+        return "", ""
+    return value, str(path)
+
+
+def first_existing_secret(candidates: list[Path]) -> tuple[str, str]:
+    for candidate in candidates:
+        value, source_path = load_secret_from_file(candidate)
+        if value:
+            return value, source_path
+    return "", ""
 
 
 def now_utc() -> datetime:
@@ -305,153 +377,272 @@ def now_utc() -> datetime:
 
 
 def now_iso() -> str:
-    return now_utc().astimezone().isoformat()
+    return datetime.now(timezone.utc).astimezone().isoformat()
 
 
-def parse_iso_datetime(value: str | None) -> datetime | None:
+def parse_iso_datetime(value: Any) -> datetime | None:
     text = clean_text(value)
     if not text:
         return None
     try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 
-def load_env_file(path: Path) -> None:
-    if not path.exists():
-        return
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
+def as_bool_param(value: bool) -> str:
+    return "true" if value else "false"
 
 
-def request_json(url: str, timeout: float) -> JsonResponse:
-    request = Request(
-        url,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "application/json, text/plain, */*",
-        },
-    )
-    with urlopen(request, timeout=timeout) as response:
-        charset = response.headers.get_content_charset() or "utf-8"
-        payload = json.loads(response.read().decode(charset))
-        headers = {key: value for key, value in response.headers.items()}
-        return JsonResponse(payload=payload, headers=headers)
+def request_json(
+    url: str,
+    *,
+    timeout: float,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    data: bytes | None = None,
+    retries: int = 0,
+    retry_backoff: float = 1.5,
+    debug: bool = False,
+) -> HttpResponse:
+    request_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    if headers:
+        request_headers.update(headers)
+
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        request = Request(url, headers=request_headers, method=method, data=data)
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                charset = response.headers.get_content_charset() or "utf-8"
+                raw = response.read().decode(charset, errors="replace")
+                payload = json.loads(raw)
+                return HttpResponse(payload=payload, headers=dict(response.headers.items()))
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            detail = body
+            try:
+                detail_payload = json.loads(body)
+                detail = json.dumps(detail_payload, ensure_ascii=False)
+            except json.JSONDecodeError:
+                pass
+
+            retryable = exc.code in {408, 425, 429, 500, 502, 503, 504}
+            last_error = RelayError(f"HTTP {exc.code} 요청 실패: {detail}")
+            if retryable and attempt < retries:
+                sleep_seconds = retry_backoff * (attempt + 1)
+                if debug:
+                    print(
+                        f"[news_relay][warn] HTTP {exc.code} 재시도 {attempt + 1}/{retries} · {sleep_seconds:.1f}s 후 재요청",
+                        file=sys.stderr,
+                    )
+                time.sleep(sleep_seconds)
+                continue
+            raise last_error from exc
+        except (TimeoutError, socket.timeout) as exc:
+            last_error = RelayError(f"네트워크 요청 시간 초과: {exc}")
+            if attempt < retries:
+                sleep_seconds = retry_backoff * (attempt + 1)
+                if debug:
+                    print(
+                        f"[news_relay][warn] 요청 시간 초과 재시도 {attempt + 1}/{retries} · {sleep_seconds:.1f}s 후 재요청",
+                        file=sys.stderr,
+                    )
+                time.sleep(sleep_seconds)
+                continue
+            raise last_error from exc
+        except URLError as exc:
+            reason = getattr(exc, "reason", exc)
+            last_error = RelayError(f"네트워크 요청 실패: {reason}")
+            if attempt < retries:
+                sleep_seconds = retry_backoff * (attempt + 1)
+                if debug:
+                    print(
+                        f"[news_relay][warn] 네트워크 오류 재시도 {attempt + 1}/{retries} · {sleep_seconds:.1f}s 후 재요청",
+                        file=sys.stderr,
+                    )
+                time.sleep(sleep_seconds)
+                continue
+            raise last_error from exc
+        except json.JSONDecodeError as exc:
+            raise RelayError(f"JSON 파싱 실패: {exc}") from exc
+
+    assert last_error is not None
+    raise last_error
 
 
+def extract_usage_headers(headers: dict[str, str]) -> dict[str, str]:
+    lowered = {key.lower(): value for key, value in headers.items()}
 
-def brevity_supported(source_lang: str, target_lang: str) -> bool:
-    source = clean_text(source_lang).lower()
-    target = clean_text(target_lang).lower()
-    brevity_targets = {"fr", "de", "it", "pt", "es"}
-    return target in brevity_targets or (source in brevity_targets and target == "en")
+    def get(name: str) -> str:
+        return lowered.get(name.lower(), "")
 
-def build_provider(name: str) -> Provider:
-    if name == "rss":
-        return RSSProvider()
-    if name == "gnews":
-        return GNewsProvider()
-    if name == "marketaux":
-        return MarketauxProvider()
-    raise ValueError(f"지원하지 않는 provider 입니다: {name}")
+    return {
+        "daily_limit": get("x-usagelimit-limit"),
+        "daily_remaining": get("x-usagelimit-remaining"),
+        "rate_limit": get("x-ratelimit-limit"),
+        "rate_remaining": get("x-ratelimit-remaining"),
+    }
 
 
 def build_marketaux_query(args: argparse.Namespace) -> str:
-    mode = args.marketaux_mode
-    query = clean_text(args.query)
-    if mode == "query":
-        return query
-    if mode == "watchlist":
-        return query
-    if mode == "indices":
-        return query or '"u.s. stocks" | "wall street" | nasdaq | "s&p 500" | dow | treasury | yields | fed'
-    if mode == "broad":
-        return f"({DEFAULT_BROAD_MARKET_QUERY}) + ({query})" if query else DEFAULT_BROAD_MARKET_QUERY
-    return query
+    if clean_text(args.query):
+        return clean_text(args.query)
+    if args.marketaux_mode == "broad":
+        return DEFAULT_BROAD_SEARCH
+    if args.marketaux_mode == "indices":
+        return '"u.s. stocks" | "wall street" | nasdaq | "s&p 500" | dow | futures | "stock market"'
+    return ""
 
 
-def parse_marketaux_usage_headers(headers: dict[str, str]) -> UsageHeaders:
-    return UsageHeaders(
-        daily_limit=headers.get("X-UsageLimit-Limit", ""),
-        daily_remaining=headers.get("X-UsageLimit-Remaining", ""),
-        rate_limit=headers.get("X-RateLimit-Limit", ""),
-        rate_remaining=headers.get("X-RateLimit-Remaining", ""),
-    )
-
-
-def derive_category(article: dict[str, Any], args: argparse.Namespace) -> str:
-    forced = clean_text(args.category_label)
-    if forced:
-        return forced
-    entities = article.get("entities") or []
+def score_article(article: dict[str, Any]) -> float:
     title = clean_text(article.get("title")).lower()
-    for label, keywords in MACRO_KEYWORDS.items():
-        if any(keyword in title for keyword in keywords):
-            return label
-    for entity in entities:
-        industry = clean_text((entity or {}).get("industry"))
-        if industry:
-            return industry
-    return "시장"
-
-
-def score_marketaux_item(item: dict[str, Any]) -> float:
-    score = 0.0
-    title = clean_text(item.get("title")).lower()
-    snippet = clean_text(item.get("snippet")).lower()
-    source = clean_text(item.get("source")).lower()
-    text = f"{title} {snippet}".strip()
-
-    for label, keywords in MACRO_KEYWORDS.items():
-        hits = sum(1 for keyword in keywords if keyword in text)
-        if hits:
-            score += 1.5 + 0.6 * hits
-            if label in {"연준", "물가", "고용", "국채금리", "지정학"}:
-                score += 0.5
-
-    for source_hint, boost in SOURCE_BOOSTS.items():
-        if source_hint in source:
-            score += boost
-            break
-
-    entities = item.get("entities") or []
-    entity_types = {clean_text((entity or {}).get("type")).lower() for entity in entities}
+    description = clean_text(article.get("description")).lower()
+    snippet = clean_text(article.get("snippet")).lower()
+    text = " ".join([part for part in [title, description, snippet] if part])
+    source = clean_text(article.get("source")).lower()
+    entities = article.get("entities") or []
     symbols = {clean_text((entity or {}).get("symbol")).upper() for entity in entities}
+    entity_types = {clean_text((entity or {}).get("type")).lower() for entity in entities}
+
+    score = 0.0
+
+    weights = {
+        "federal reserve": 10,
+        "fed": 8,
+        "fomc": 10,
+        "powell": 8,
+        "inflation": 8,
+        "cpi": 9,
+        "pce": 8,
+        "payrolls": 9,
+        "nonfarm payrolls": 10,
+        "unemployment": 8,
+        "jobs": 5,
+        "gdp": 7,
+        "recession": 7,
+        "treasury": 7,
+        "yield": 6,
+        "bond": 4,
+        "10-year": 7,
+        "2-year": 6,
+        "oil": 6,
+        "crude": 6,
+        "opec": 7,
+        "tariff": 6,
+        "sanction": 6,
+        "geopolit": 6,
+        "china stimulus": 6,
+        "consumer confidence": 5,
+        "retail sales": 5,
+        "pmi": 5,
+        "wall street": 8,
+        "u.s. stocks": 9,
+        "stock market": 7,
+        "s&p 500": 9,
+        "nasdaq": 8,
+        "dow": 7,
+        "futures": 5,
+    }
+    for keyword, weight in weights.items():
+        if keyword in text:
+            score += weight
+
+    source_bonus = {
+        "reuters": 5,
+        "bloomberg": 4,
+        "wsj": 3,
+        "cnbc": 3,
+        "marketwatch": 2,
+        "ft": 3,
+        "investing.com": 1,
+        "finance.yahoo.com": 1,
+    }
+    for keyword, weight in source_bonus.items():
+        if keyword in source:
+            score += weight
+
     if entity_types & BROAD_ENTITY_TYPES:
-        score += 1.8
+        score += 3
     if symbols & INDEX_SYMBOLS:
-        score += 1.6
-    if len(symbols) == 1 and not (symbols & INDEX_SYMBOLS):
-        score -= 1.0
+        score += 4
 
-    if any(noise in text for noise in STOCK_NOISE_HINTS):
-        score -= 1.4
+    equity_symbols = [symbol for symbol in symbols if symbol and symbol not in INDEX_SYMBOLS]
+    if len(equity_symbols) == 1 and score < 10:
+        score -= 4
 
-    published = parse_iso_datetime(item.get("publishedAt"))
-    if published:
-        age_hours = max((now_utc() - published).total_seconds() / 3600, 0)
-        freshness_bonus = max(3.0 - min(age_hours, 12) * 0.2, 0)
-        score += freshness_bonus
+    published_at = parse_iso_datetime(article.get("published_at"))
+    if published_at is not None:
+        age_hours = max((now_utc() - published_at).total_seconds() / 3600, 0)
+        score += max(0.0, 6 - age_hours * 0.2)
 
-    return round(score, 4)
+    return round(score, 3)
+
+
+
+def classify_market_sentiment(title: str, snippet: str, entities: list[dict[str, Any]]) -> str:
+    text = f"{clean_text(title)} {clean_text(snippet)}".lower()
+    entity_names = " ".join(clean_text((entity or {}).get("name")) for entity in (entities or []))
+    if entity_names:
+        text = f"{text} {entity_names.lower()}"
+
+    score = 0
+    for term in SENTIMENT_POSITIVE_TERMS:
+        if term in text:
+            score += 1
+    for term in SENTIMENT_NEGATIVE_TERMS:
+        if term in text:
+            score -= 1
+
+    yield_context = any(term in text for term in ("yield", "yields", "treasury", "bond"))
+    oil_context = any(term in text for term in ("oil", "crude", "wti", "brent", "opec"))
+    inflation_context = any(term in text for term in ("inflation", "cpi", "pce", "ppi"))
+
+    if yield_context:
+        if any(term in text for term in SENTIMENT_DOWN_WORDS):
+            score += 2
+        if any(term in text for term in SENTIMENT_UP_WORDS):
+            score -= 2
+    if oil_context:
+        if any(term in text for term in SENTIMENT_DOWN_WORDS):
+            score += 2
+        if any(term in text for term in SENTIMENT_UP_WORDS):
+            score -= 2
+    if inflation_context:
+        if any(term in text for term in ("cool", "cooling", "ease", "easing", "soft", "slower", "slowdown")):
+            score += 2
+        if any(term in text for term in ("hot", "sticky", "surge", "reaccelerat", "faster", "higher")):
+            score -= 2
+
+    if score >= 2:
+        return "positive"
+    if score <= -2:
+        return "negative"
+    return "neutral"
+
+def categorize_article(title: str, snippet: str, entities: list[dict[str, Any]]) -> str:
+    text = f"{clean_text(title)} {clean_text(snippet)}".lower()
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            return category
+
+    entity_types = {clean_text((entity or {}).get("type")).lower() for entity in entities}
+    if "commodity" in entity_types:
+        return "원자재"
+    if "currency" in entity_types:
+        return "외환"
+    if "index" in entity_types:
+        return "지수"
+    if entities:
+        return "마켓"
+    return "뉴스"
 
 
 def dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     result: list[dict[str, Any]] = []
     for item in items:
-        key = clean_text(item.get("url") or item.get("id") or item.get("title") or "")
+        key = clean_text(item.get("url") or item.get("id") or item.get("title")).lower()
         if not key or key in seen:
             continue
         seen.add(key)
@@ -459,232 +650,305 @@ def dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def apply_broad_market_filter(items: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
+    if args.provider != "marketaux" or args.marketaux_mode == "watchlist":
+        return items
+    filtered = [item for item in items if float(item.get("_score") or 0) >= args.min_overlay_score]
+    return filtered or items
+
+
 def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    def key(item: dict[str, Any]) -> tuple[float, str]:
+    def key(item: dict[str, Any]) -> tuple[float, float]:
         score = float(item.get("_score") or 0)
-        published_at = clean_text(item.get("publishedAt") or "")
-        return (score, published_at)
+        published = parse_iso_datetime(item.get("publishedAt") or item.get("published_at"))
+        timestamp = published.timestamp() if published else 0.0
+        return (score, timestamp)
 
     return sorted(items, key=key, reverse=True)
 
 
-def load_json_file(path: Path, fallback: Any) -> Any:
-    if not path.exists():
-        return fallback
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return fallback
+def build_translation_context(item: dict[str, Any], *, max_chars: int) -> str:
+    parts: list[str] = []
+    for key in ["snippet", "description", "summary"]:
+        text = clean_text(item.get(key))
+        if text:
+            parts.append(text)
+    entities = item.get("entities") or []
+    entity_names = [clean_text((entity or {}).get("name")) for entity in entities]
+    entity_names = [name for name in entity_names if name]
+    if entity_names:
+        parts.append("Entities: " + ", ".join(entity_names[:10]))
+    context = " ".join(parts)
+    if max_chars > 0 and len(context) > max_chars:
+        return context[:max_chars].rsplit(" ", 1)[0]
+    return context
 
 
-def save_json_file(path: Path, data: Any) -> None:
+def build_custom_instructions(args: argparse.Namespace) -> list[str]:
+    instructions: list[str] = []
+    if args.translate_instructions:
+        for piece in args.translate_instructions.split("||"):
+            text = clean_text(piece)
+            if text:
+                instructions.append(text)
+    else:
+        instructions.extend(DEFAULT_DEEPL_INSTRUCTIONS)
+    return instructions[:10]
+
+
+def load_replacements(path_text: str) -> dict[str, str]:
+    replacements = dict(DEFAULT_KO_REPLACEMENTS)
+    path = Path(path_text) if path_text else None
+    if path and not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if path and path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                for key, value in payload.items():
+                    key_text = clean_text(key)
+                    value_text = clean_text(value)
+                    if key_text and value_text:
+                        replacements[key_text] = value_text
+        except json.JSONDecodeError:
+            pass
+    return replacements
+
+
+def apply_replacements(text: str, replacements: dict[str, str]) -> str:
+    out = text
+    for src, dst in replacements.items():
+        out = out.replace(src, dst)
+    out = re.sub(r"\s+", " ", out).strip()
+    return out
+
+
+def load_translation_cache(path_text: str) -> tuple[Path | None, dict[str, Any]]:
+    if not path_text:
+        return None, {}
+    path = Path(path_text)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return path, payload
+        except json.JSONDecodeError:
+            pass
+    return path, {}
+
+
+def save_translation_cache(path: Path | None, cache: dict[str, Any]) -> None:
+    if path is None:
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def load_terms_mapping(path_str: str) -> dict[str, str]:
-    if not path_str:
-        return {}
-    path = Path(path_str)
-    data = load_json_file(path, {})
-    if not isinstance(data, dict):
-        return {}
-    result: dict[str, str] = {}
-    for source, target in data.items():
-        source_text = clean_text(source)
-        target_text = clean_text(target)
-        if source_text and target_text:
-            result[source_text] = target_text
-    return result
+def build_translator(args: argparse.Namespace) -> Translator:
+    provider = clean_text(args.translate_provider).lower()
+    if provider in {"", "none"}:
+        return NullTranslator()
+    if provider == "deepl":
+        return DeepLTranslator(args)
+    raise RelayError(f"지원하지 않는 translate_provider 입니다: {args.translate_provider}")
 
 
-def apply_korean_terms(text: str, mapping: dict[str, str]) -> str:
-    output = clean_text(text)
-    for source, target in sorted(mapping.items(), key=lambda kv: len(kv[0]), reverse=True):
-        output = output.replace(source, target)
-    return clean_text(output)
+def translation_cache_key(item: dict[str, Any], args: argparse.Namespace) -> str:
+    base = "|".join(
+        [
+            clean_text(item.get("title")),
+            clean_text(args.translate_source).upper(),
+            clean_text(args.translate_target).upper(),
+            clean_text(args.deepl_glossary_id),
+            clean_text(args.translate_instructions),
+        ]
+    )
+    return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
-def headline_cache_key(provider: str, src: str, tgt: str, title: str, formality: str, brevity: bool) -> str:
-    raw = "|".join([provider, src, tgt, title, formality or "", "brevity-on" if brevity else "brevity-off"])
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
-
-
-def build_translator(args: argparse.Namespace) -> HeadlineTranslator | None:
-    if args.translate_provider == "none":
-        return None
-    if args.translate_provider == "amazon":
-        return AmazonHeadlineTranslator(args)
-    raise ValueError(f"지원하지 않는 translate-provider 입니다: {args.translate_provider}")
-
-
-def translate_items(items: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
+def translate_items(items: list[dict[str, Any]], args: argparse.Namespace) -> tuple[list[dict[str, Any]], int]:
     translator = build_translator(args)
-    if translator is None:
-        return items
+    if isinstance(translator, NullTranslator):
+        return items, 0
 
-    cache_path = Path(args.translate_cache)
-    cache = load_json_file(cache_path, {})
-    if not isinstance(cache, dict):
-        cache = {}
-    terms_mapping = load_terms_mapping(args.translate_terms_file)
-    updated = False
+    replacements = load_replacements(args.translate_terms_file)
+    cache_path, cache = load_translation_cache(args.translate_cache)
+    total_billed = 0
+    translated_items: list[dict[str, Any]] = []
 
     for item in items:
         title = clean_text(item.get("title"))
-        existing_ko = clean_text(item.get("titleKo"))
-        if not title:
-            continue
-        if existing_ko and args.translate_skip_existing:
-            item["titleKo"] = apply_korean_terms(existing_ko, terms_mapping)
-            continue
-        cache_key = headline_cache_key(
-            args.translate_provider,
-            args.translate_source,
-            args.translate_target,
-            title,
-            args.translate_formality,
-            args.translate_brevity,
-        )
-        translated = clean_text(cache.get(cache_key))
-        if not translated:
-            translated = translator.translate_item(item, args)
-            translated = apply_korean_terms(translated, terms_mapping)
-            if translated:
-                cache[cache_key] = translated
-                updated = True
-        if translated:
-            item["titleKo"] = translated
-        elif not item.get("titleKo"):
-            item["titleKo"] = ""
+        cache_key = translation_cache_key(item, args)
+        translated_text = ""
+        from_cache = False
 
-    if updated:
-        save_json_file(cache_path, cache)
-    return items
+        if cache_key in cache:
+            translated_text = clean_text(cache.get(cache_key))
+            from_cache = True
+        else:
+            try:
+                result = translator.translate_item(item, args)
+                translated_text = result.text
+                total_billed += result.billed_characters
+                cache[cache_key] = translated_text
+                from_cache = result.from_cache
+            except Exception as exc:  # noqa: BLE001
+                if args.debug:
+                    print(f"[news_relay][warn] translate failed: {exc}", file=sys.stderr)
+                translated_text = title
+
+        translated_text = apply_replacements(translated_text, replacements)
+        item_copy = dict(item)
+        item_copy["titleKo"] = translated_text or title
+        item_copy["_translated_from_cache"] = from_cache
+        translated_items.append(item_copy)
+
+    save_translation_cache(cache_path, cache)
+    return translated_items, total_billed
 
 
-def trim_runtime_fields(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": clean_text(item.get("id")),
-        "title": clean_text(item.get("title")),
-        "titleKo": clean_text(item.get("titleKo")),
-        "publishedAt": clean_text(item.get("publishedAt")),
-        "source": clean_text(item.get("source")),
-        "category": clean_text(item.get("category")),
-        "url": clean_text(item.get("url")),
-    }
+def strip_internal_fields(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{key: value for key, value in item.items() if not key.startswith("_")} for item in items]
 
 
-def write_payload(out_path: Path, items: list[dict[str, Any]]) -> None:
-    payload = {
-        "updatedAt": now_iso(),
-        "items": [trim_runtime_fields(item) for item in items],
-    }
+def write_payload(out_path: Path, items: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
+    payload: dict[str, Any] = {"updatedAt": now_iso(), "items": items}
+    if meta:
+        payload["meta"] = meta
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def debug_log(enabled: bool, *parts: Any) -> None:
-    if enabled:
-        print("[news_relay][debug]", *parts)
 
 
 def refresh_once(provider: Provider, args: argparse.Namespace) -> None:
     result = provider.fetch(args)
     items = dedupe_items(result.items)
+    items = apply_broad_market_filter(items, args)
     items = sort_items(items)
     items = items[: args.limit]
-    items = translate_items(items, args)
-    write_payload(Path(args.out), items)
 
-    print(f"[news_relay] wrote {len(items)} items -> {args.out}")
-    usage = (result.meta or {}).get("usage") or {}
-    if usage.get("daily_remaining") or usage.get("rate_remaining"):
-        print(
-            "[news_relay] marketaux usage"
-            f" daily {usage.get('daily_remaining', '?')}/{usage.get('daily_limit', '?')}"
-            f" | rate {usage.get('rate_remaining', '?')}/{usage.get('rate_limit', '?')}"
-        )
-    debug_log(args.debug, "translate_provider=", args.translate_provider)
-    for idx, item in enumerate(items, start=1):
-        debug_log(
-            args.debug,
-            f"{idx}. score={item.get('_score', 0)}",
-            clean_text(item.get("titleKo") or item.get("title")),
-            "|",
-            clean_text(item.get("source")),
-        )
+    translated_items, billed_chars = translate_items(items, args)
+    cleaned_items = strip_internal_fields(translated_items)
 
+    meta = dict(result.meta)
+    meta["translate_provider"] = clean_text(args.translate_provider or "none")
+    if billed_chars:
+        meta["deepl_billed_characters"] = billed_chars
 
-def as_bool_param(value: bool) -> str:
-    return "true" if value else "false"
+    out_path = Path(args.out)
+    if not out_path.is_absolute():
+        out_path = PROJECT_ROOT / out_path
+    write_payload(out_path, cleaned_items, meta=meta)
+    print(f"[news_relay] wrote {len(cleaned_items)} items -> {args.out}")
+
+    if args.debug:
+        print(f"[news_relay][debug] translate_provider= {clean_text(args.translate_provider or 'none')}")
+        if args.file_marketaux_api_token_path:
+            print(f"[news_relay][debug] marketaux_key_file= {args.file_marketaux_api_token_path}")
+        if args.file_deepl_api_key_path and clean_text(args.translate_provider).lower() == "deepl":
+            print(f"[news_relay][debug] deepl_key_file= {args.file_deepl_api_key_path}")
+        if billed_chars:
+            print(f"[news_relay][debug] deepl billed_characters= {billed_chars}")
+        for index, item in enumerate(translated_items[:5], start=1):
+            score = item.get("_score")
+            print(f"[news_relay][debug] {index}. score={score} {item.get('title')} | {item.get('source')}")
+            if clean_text(args.translate_provider).lower() == "deepl":
+                print(f"[news_relay][debug]    ko= {item.get('titleKo')}")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="허용된 뉴스 피드/API를 오버레이용 JSON(data/news.live.json)으로 정규화합니다."
-    )
-    parser.add_argument("--provider", choices=["rss", "gnews", "marketaux"], required=True)
-    parser.add_argument("--out", default="data/news.live.json", help="출력 JSON 경로")
-    parser.add_argument("--limit", type=int, default=5, help="최종 표시 뉴스 개수")
-    parser.add_argument("--fetch-limit", type=int, default=20, help="원본 API/RSS에서 먼저 가져올 개수")
-    parser.add_argument("--timeout", type=float, default=8.0, help="피드 요청 타임아웃(초)")
-    parser.add_argument("--watch", type=int, default=0, help="0이면 1회 실행, 양수면 N초마다 반복")
-    parser.add_argument("--api-key", default="", help="뉴스 API 키. 비워 두면 환경변수 사용")
-    parser.add_argument("--provider-label", default="", help="강제 source 라벨")
-    parser.add_argument("--category-label", default="", help="강제 category 라벨")
-    parser.add_argument("--lang", default="en", help="뉴스 언어 코드. 예: en, ko")
-    parser.add_argument("--country", default="", help="GNews 국가 코드. 예: us, kr")
-    parser.add_argument("--query", default="", help="검색 질의어")
-    parser.add_argument("--category", default="business", help="GNews top-headlines 카테고리")
-    parser.add_argument("--from-iso", default="", help="GNews 시작 시각 ISO8601")
-    parser.add_argument("--to-iso", default="", help="GNews 종료 시각 ISO8601")
-    parser.add_argument("--rss", action="append", help="RSS/Atom URL 또는 로컬 XML 파일 경로")
+    parser = argparse.ArgumentParser(description="marketaux 뉴스를 오버레이용 JSON으로 정규화하고, 필요시 DeepL로 한국어 헤드라인을 생성합니다. API 키는 keys/*.txt 에서 자동으로 읽을 수 있습니다.")
 
-    parser.add_argument("--marketaux-mode", choices=["broad", "indices", "watchlist", "query"], default="broad")
-    parser.add_argument("--symbols", default="", help="marketaux 심볼 필터. 예: SPY,QQQ,NVDA")
-    parser.add_argument("--countries", default="", help="marketaux 국가 필터. 예: us")
-    parser.add_argument("--industries", default="", help="marketaux 업종 필터")
-    parser.add_argument("--domains", default="", help="marketaux 도메인 필터")
-    parser.add_argument("--source-ids", default="", help="marketaux source_ids 필터")
-    parser.add_argument("--published-after", default="", help="marketaux published_after 값. 예: 2026-05-01")
-    parser.add_argument("--sort", default="", help="marketaux sort 파라미터. 기본은 marketaux 기본값 사용")
-    parser.add_argument("--must-have-entities", action="store_true", help="엔티티가 있는 기사만 사용")
-    parser.add_argument("--group-similar", action="store_true", default=True, help="유사 기사 묶기")
-    parser.add_argument("--filter-entities", action="store_true", default=True, help="엔티티 필터 사용")
-    parser.add_argument("--use-preferred-domains", action="store_true", help="broad 모드에서 선호 도메인 우선")
+    parser.add_argument("--provider", choices=["marketaux"], required=True)
+    parser.add_argument("--out", default="data/news.live.json")
+    parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--fetch-limit", type=int, default=20)
+    parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument("--request-retries", type=int, default=2)
+    parser.add_argument("--retry-backoff", type=float, default=1.5)
+    parser.add_argument("--watch", type=int, default=0)
+    parser.add_argument("--debug", action="store_true")
 
-    parser.add_argument("--translate-provider", choices=["none", "amazon"], default="amazon")
-    parser.add_argument("--translate-source", default="en", help="번역 원문 언어")
-    parser.add_argument("--translate-target", default="ko", help="번역 대상 언어")
-    parser.add_argument("--translate-cache", default="data/translate_cache.ko.json", help="번역 캐시 JSON 경로")
-    parser.add_argument("--translate-terms-file", default="tools/ko_terms.sample.json", help="번역 후처리 용어집 JSON 경로")
-    parser.add_argument("--translate-formality", choices=["FORMAL", "INFORMAL", ""], default="FORMAL")
-    parser.add_argument("--no-translate-brevity", dest="translate_brevity", action="store_false", help="Amazon brevity 끄기")
-    parser.set_defaults(translate_brevity=True)
-    parser.add_argument("--translate-skip-existing", action="store_true", default=True, help="이미 titleKo가 있으면 재번역 생략")
-    parser.add_argument("--aws-region", default=os.getenv("AWS_DEFAULT_REGION", "us-east-1"), help="Amazon Translate 리전")
-    parser.add_argument("--aws-profile", default="", help="AWS profile 이름")
-    parser.add_argument("--aws-terminology-name", default="", help="Amazon Translate custom terminology 이름")
+    parser.add_argument("--api-key", default="")
+    parser.add_argument("--key-dir", default="keys")
+    parser.add_argument("--marketaux-key-file", default="")
+    parser.add_argument("--provider-label", default="")
+    parser.add_argument("--category-label", default="")
+    parser.add_argument("--lang", default="en")
+    parser.add_argument("--query", default="")
+    parser.add_argument("--country", default="")  # compatibility only
 
-    parser.add_argument("--assume-ko", action="store_true", help="RSS 제목을 그대로 titleKo 로도 저장")
-    parser.add_argument("--debug", action="store_true", help="디버그 로그 출력")
+    parser.add_argument("--marketaux-mode", choices=["broad", "indices", "watchlist"], default="broad")
+    parser.add_argument("--countries", default="us")
+    parser.add_argument("--domains", default="")
+    parser.add_argument("--published-after", default="")
+    parser.add_argument("--must-have-entities", action="store_true", default=False)
+    parser.add_argument("--no-must-have-entities", action="store_false", dest="must_have_entities")
+    parser.add_argument("--group-similar", action="store_true", default=True)
+    parser.add_argument("--no-group-similar", action="store_false", dest="group_similar")
+    parser.add_argument("--filter-entities", action="store_true", default=True)
+    parser.add_argument("--no-filter-entities", action="store_false", dest="filter_entities")
+    parser.add_argument("--lookback-hours", type=int, default=48)
+    parser.add_argument("--use-preferred-domains", action="store_true")
+    parser.add_argument("--sort", default="")
+    parser.add_argument("--min-overlay-score", type=float, default=6.5)
+
+    parser.add_argument("--translate-provider", choices=["none", "deepl"], default="none")
+    parser.add_argument("--translate-target", default="ko")
+    parser.add_argument("--translate-source", default="en")
+    parser.add_argument("--translate-cache", default="data/translate_cache.ko.json")
+    parser.add_argument("--translate-context-chars", type=int, default=1500)
+    parser.add_argument("--translate-terms-file", default="tools/ko_terms.sample.json")
+    parser.add_argument("--translate-instructions", default="")
+    parser.add_argument("--translate-api-key", default="")  # generic alias
+
+    parser.add_argument("--deepl-api-key", default="")
+    parser.add_argument("--deepl-key-file", default="")
+    parser.add_argument("--deepl-api-url", default="")
+    parser.add_argument("--deepl-glossary-id", default="")
+
+    parser.add_argument("--aws-region", default="", help=argparse.SUPPRESS)  # backward compatibility
+
     args = parser.parse_args()
 
-    project_root = Path(__file__).resolve().parent.parent
-    load_env_file(project_root / ".env.local")
-    load_env_file(project_root / ".env")
+    load_env_file(PROJECT_ROOT / ".env.local")
+    load_env_file(PROJECT_ROOT / ".env")
 
-    args.env_gnews_api_key = os.getenv("GNEWS_API_KEY", "")
     args.env_marketaux_api_token = os.getenv("MARKETAUX_API_TOKEN", "")
-    if not args.published_after and args.provider == "marketaux":
-        args.published_after = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
+    args.env_deepl_api_key = os.getenv("DEEPL_API_KEY", "")
+
+    key_dir = resolve_path(args.key_dir)
+    marketaux_candidates: list[Path] = []
+    if clean_text(args.marketaux_key_file):
+        marketaux_candidates.append(resolve_path(args.marketaux_key_file))
+    marketaux_candidates.extend(DEFAULT_MARKETAUX_KEY_FILES)
+    if key_dir != DEFAULT_KEYS_DIR:
+        marketaux_candidates.extend([key_dir / "marketaux_token.txt", key_dir / "marketaux.txt"])
+
+    deepl_candidates: list[Path] = []
+    if clean_text(args.deepl_key_file):
+        deepl_candidates.append(resolve_path(args.deepl_key_file))
+    deepl_candidates.extend(DEFAULT_DEEPL_KEY_FILES)
+    if key_dir != DEFAULT_KEYS_DIR:
+        deepl_candidates.extend([key_dir / "deepl_api_key.txt", key_dir / "deepl_key.txt", key_dir / "deepl.txt"])
+
+    args.file_marketaux_api_token, args.file_marketaux_api_token_path = first_existing_secret(marketaux_candidates)
+    args.file_deepl_api_key, args.file_deepl_api_key_path = first_existing_secret(deepl_candidates)
+
+    if args.use_preferred_domains and not args.domains:
+        args.domains = DEFAULT_PREFERRED_DOMAINS
+    if not args.published_after:
+        args.published_after = (now_utc() - timedelta(hours=max(args.lookback_hours, 1))).strftime("%Y-%m-%dT%H:%M")
+    if not args.sort and (args.query or args.marketaux_mode == "broad"):
+        args.sort = "relevance_score"
+
     return args
 
 
 def main() -> int:
     args = parse_args()
-    provider = build_provider(args.provider)
+    provider = MarketauxProvider()
 
     try:
         if args.watch > 0:

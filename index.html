@@ -11,15 +11,22 @@
   </head>
   <body>
     <main class="overlay-shell">
-      <section class="news-widget" id="news-widget" data-status="loading" aria-live="polite">
+      <section class="news-widget" id="news-widget" data-status="loading" data-edit-mode="false" aria-live="polite">
         <header class="widget-header">
-          <div>
+          <div class="widget-header__main">
             <p class="eyebrow">LIVE OVERLAY</p>
             <h1 class="widget-title" id="widget-title">미국 증시 뉴스</h1>
           </div>
-          <div class="status-badge" id="status-badge">
-            <span class="status-dot" aria-hidden="true"></span>
-            <span id="status-text">불러오는 중</span>
+
+          <div class="widget-actions">
+            <div class="widget-action-row">
+              <button class="toolbar-btn" id="edit-toggle" type="button" aria-pressed="false">편집</button>
+              <button class="toolbar-btn toolbar-btn--ghost" id="clear-pins" type="button" hidden>핀 초기화</button>
+            </div>
+            <div class="status-badge" id="status-badge">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="status-text">불러오는 중</span>
+            </div>
           </div>
         </header>
 

@@ -1,0 +1,12 @@
+
+# Local env / secrets
+.env.local
+keys/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Generated runtime data/cache
+data/news.live.json
+data/translate_cache*.json
