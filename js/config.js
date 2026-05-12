@@ -13,8 +13,49 @@ window.NEWS_WIDGET_CONFIG = {
   source: {
     type: 'json',
     url: 'data/news.live.json',
-    label: 'Live Feed',
+    label: 'Combined Feed',
     keepStaleOnError: true,
+  },
+
+  tabs: {
+    enabled: true,
+    defaultKey: 'combined',
+    storageKey: 'news-overlay-widget.activeTab.v1',
+    items: [
+      {
+        key: 'combined',
+        label: 'Combined',
+        title: '미국 증시 뉴스',
+        source: {
+          type: 'json',
+          url: 'data/news.live.json',
+          label: 'Combined Feed',
+          keepStaleOnError: true,
+        },
+      },
+      {
+        key: 'reuters',
+        label: 'Reuters',
+        title: 'Reuters 뉴스',
+        source: {
+          type: 'json',
+          url: 'data/news.reuters.json',
+          label: 'Reuters Feed',
+          keepStaleOnError: true,
+        },
+      },
+      {
+        key: 'marketaux',
+        label: 'Marketaux',
+        title: 'Marketaux 뉴스',
+        source: {
+          type: 'json',
+          url: 'data/news.marketaux.json',
+          label: 'Marketaux Feed',
+          keepStaleOnError: true,
+        },
+      },
+    ],
   },
 
   sentiment: {

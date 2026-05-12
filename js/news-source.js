@@ -47,18 +47,33 @@
     return String(value ?? '').replace(/\s+/g, ' ').trim();
   }
 
+  function toIsoDateOnly(value) {
+    const direct = normalizeText(value);
+    const match = direct.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+
+    const date = parseDate(direct);
+    return date ? date.toISOString().slice(0, 10) : '';
+  }
+
   function normalizeNewsItem(rawItem, fallbackSourceLabel) {
     const titleKo = normalizeText(rawItem.titleKo || rawItem.title_ko || rawItem.headlineKo);
     const title = normalizeText(rawItem.title || rawItem.headline || rawItem.name);
     const publishedDate = parseDate(
       rawItem.publishedAt || rawItem.published_at || rawItem.pubDate || rawItem.time || rawItem.datetime || rawItem.updatedAt,
     );
+    const publishedDateOnly = toIsoDateOnly(
+      rawItem.publishedDate || rawItem.published_date || rawItem.datePublished || rawItem.date || rawItem.displayDate,
+    ) || (publishedDate ? publishedDate.toISOString().slice(0, 10) : '');
 
     return {
-      id: normalizeText(rawItem.id || rawItem.uuid || rawItem.guid || rawItem.url || rawItem.link || `${title}-${publishedDate?.toISOString?.() ?? ''}`),
+      id: normalizeText(rawItem.id || rawItem.uuid || rawItem.guid || rawItem.url || rawItem.link || `${title}-${publishedDate?.toISOString?.() ?? publishedDateOnly}`),
       title: titleKo || title || '제목 없음',
       titleKo: titleKo || '',
       publishedAt: publishedDate ? publishedDate.toISOString() : null,
+      publishedDate: publishedDateOnly || '',
       source: normalizeText(rawItem.source || rawItem.provider || rawItem.feedTitle || fallbackSourceLabel || 'Feed'),
       category: normalizeText(rawItem.category || rawItem.section || rawItem.topic || ''),
       sentiment: normalizeText(rawItem.sentiment || rawItem.tone || rawItem.status || rawItem.impact || '').toLowerCase(),
@@ -85,6 +100,7 @@
     return {
       updatedAt: updatedDate.toISOString(),
       items,
+      meta: base.meta && typeof base.meta === 'object' ? base.meta : {},
     };
   }
 

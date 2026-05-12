@@ -1,4 +1,3 @@
-
 (function () {
   const widgetEl = document.getElementById('news-widget');
   const titleEl = document.getElementById('widget-title');
@@ -7,28 +6,34 @@
   const footerTextEl = document.getElementById('footer-text');
   const editToggleEl = document.getElementById('edit-toggle');
   const clearPinsEl = document.getElementById('clear-pins');
+  const feedTabsEl = document.getElementById('feed-tabs');
 
   const defaultConfig = window.NEWS_WIDGET_CONFIG || {};
   const runtimeConfig = resolveRuntimeConfig(defaultConfig);
-  const source = window.NewsSourceFactory.createSource(runtimeConfig.source);
   const pinningEnabled = Boolean(runtimeConfig.pinning?.enabled);
+  let source = createSourceForTab(runtimeConfig.activeTabKey);
 
   const state = {
     items: [],
     lastSuccessAt: null,
     feedUpdatedAt: null,
+    feedMeta: {},
     lastError: '',
     empty: false,
     loading: true,
     requestInFlight: false,
+    requestSeq: 0,
+    currentAbortController: null,
     timerId: null,
     clockTimerId: null,
+    activeTabKey: runtimeConfig.activeTabKey,
     editMode: pinningEnabled && Boolean(runtimeConfig.pinning?.startInEditMode),
-    pinnedEntries: loadPinnedEntries(),
+    pinnedEntries: loadPinnedEntries(runtimeConfig.activeTabKey),
   };
 
-  titleEl.textContent = runtimeConfig.widgetTitle;
+  titleEl.textContent = getActiveWidgetTitle();
   setupToolbar();
+  setupTabs();
   start();
 
   function start() {
@@ -66,6 +71,79 @@
     }
   }
 
+  function setupTabs() {
+    const tabs = getEnabledTabs();
+    if (!feedTabsEl) {
+      return;
+    }
+
+    feedTabsEl.innerHTML = '';
+    feedTabsEl.hidden = !areTabsVisible();
+
+    tabs.forEach((tab) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'feed-tab';
+      button.id = `feed-tab-${tab.key}`;
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-controls', 'news-list');
+      button.dataset.tabKey = tab.key;
+      button.textContent = tab.label;
+      button.addEventListener('click', () => switchFeedTab(tab.key));
+      feedTabsEl.appendChild(button);
+    });
+
+    updateTabs();
+  }
+
+  function updateTabs() {
+    if (!feedTabsEl || !areTabsVisible()) {
+      return;
+    }
+
+    feedTabsEl.hidden = false;
+    Array.from(feedTabsEl.querySelectorAll('.feed-tab')).forEach((button) => {
+      const selected = button.dataset.tabKey === state.activeTabKey;
+      button.setAttribute('aria-selected', String(selected));
+      button.setAttribute('tabindex', selected ? '0' : '-1');
+    });
+  }
+
+  function switchFeedTab(tabKey) {
+    const tab = getTabConfig(tabKey);
+    if (!tab || tab.key === state.activeTabKey) {
+      return;
+    }
+
+    if (state.currentAbortController) {
+      state.currentAbortController.abort();
+    }
+    if (state.timerId) {
+      window.clearTimeout(state.timerId);
+      state.timerId = null;
+    }
+
+    state.requestSeq += 1;
+    state.requestInFlight = false;
+    state.currentAbortController = null;
+    state.activeTabKey = tab.key;
+    state.items = [];
+    state.feedUpdatedAt = null;
+    state.feedMeta = {};
+    state.lastSuccessAt = null;
+    state.lastError = '';
+    state.empty = false;
+    state.loading = true;
+    state.pinnedEntries = loadPinnedEntries(tab.key);
+    state.editMode = pinningEnabled && state.editMode;
+
+    saveActiveTabKey(tab.key);
+    source = createSourceForTab(tab.key);
+    titleEl.textContent = getActiveWidgetTitle();
+    render();
+    refreshNews();
+  }
+
   function scheduleClockRefresh() {
     if (state.clockTimerId) {
       window.clearTimeout(state.clockTimerId);
@@ -83,38 +161,61 @@
       return;
     }
 
+    const requestId = state.requestSeq + 1;
+    const requestTabKey = state.activeTabKey;
+    const requestSource = source;
+
+    state.requestSeq = requestId;
     state.requestInFlight = true;
     state.loading = true;
     render();
 
     const controller = new AbortController();
+    state.currentAbortController = controller;
     const timeoutId = window.setTimeout(() => controller.abort(), runtimeConfig.requestTimeoutMs);
 
     try {
-      const payload = await source.fetchNews({ signal: controller.signal });
-      const rawItems = Array.isArray(payload.items) ? payload.items : [];
+      const payload = await requestSource.fetchNews({ signal: controller.signal });
+      if (!isCurrentRequest(requestId, requestTabKey)) {
+        return;
+      }
 
+      const rawItems = Array.isArray(payload.items) ? payload.items : [];
       state.items = dedupeLiveItems(rawItems);
       state.feedUpdatedAt = payload.updatedAt || new Date().toISOString();
+      state.feedMeta = payload.meta || {};
       state.lastSuccessAt = new Date().toISOString();
       state.lastError = '';
       state.empty = state.items.length === 0;
     } catch (error) {
+      if (!isCurrentRequest(requestId, requestTabKey)) {
+        return;
+      }
+
       state.lastError = toDisplayError(error);
       state.empty = state.items.length === 0;
 
-      if (!runtimeConfig.source.keepStaleOnError) {
+      if (!getActiveSourceConfig().keepStaleOnError) {
         state.items = [];
       }
 
       debugLog('refreshNews error', error);
     } finally {
       window.clearTimeout(timeoutId);
+      if (!isCurrentRequest(requestId, requestTabKey)) {
+        return;
+      }
+
       state.loading = false;
       state.requestInFlight = false;
+      state.currentAbortController = null;
       render();
       scheduleRefresh(runtimeConfig.refreshMs);
     }
+  }
+
+  function isCurrentRequest(requestId, tabKey) {
+    return state.requestSeq === requestId && state.activeTabKey === tabKey;
   }
 
   function scheduleRefresh(delay) {
@@ -129,11 +230,13 @@
     const displayItems = getDisplayItems();
     const status = deriveStatus(displayItems);
 
+    titleEl.textContent = getActiveWidgetTitle();
     widgetEl.dataset.status = status.kind;
     widgetEl.dataset.editMode = String(state.editMode);
     statusTextEl.textContent = status.label;
     footerTextEl.textContent = buildFooterText(status.kind, displayItems);
 
+    updateTabs();
     updateToolbar();
 
     if (state.loading && displayItems.length === 0) {
@@ -245,7 +348,7 @@
       if (runtimeConfig.sentiment?.enabled !== false) {
         meta.appendChild(makeSentimentChip(sentiment));
       }
-      meta.appendChild(makeChip(formatPublishedLabel(item.publishedAt)));
+      meta.appendChild(makeChip(formatPublishedLabel(item)));
 
       if (isPinned) {
         meta.appendChild(makeChip(isLivePinned ? 'PIN' : 'PIN 보존', 'meta-chip--pin'));
@@ -264,7 +367,7 @@
       }
 
       const titleText = resolveDisplayTitle(item);
-      let titleEl;
+      let titleNode;
 
       if (hasUrl) {
         const linkEl = document.createElement('a');
@@ -283,12 +386,12 @@
           event.preventDefault();
           openArticle(item);
         });
-        titleEl = linkEl;
+        titleNode = linkEl;
       } else {
         const staticTitle = document.createElement('h2');
         staticTitle.className = 'news-card__title';
         staticTitle.textContent = titleText;
-        titleEl = staticTitle;
+        titleNode = staticTitle;
       }
 
       if (hasUrl && runtimeConfig.clickOpensArticle && !state.editMode) {
@@ -309,7 +412,7 @@
       }
 
       card.appendChild(meta);
-      card.appendChild(titleEl);
+      card.appendChild(titleNode);
       newsListEl.appendChild(card);
     });
   }
@@ -332,7 +435,6 @@
     card.appendChild(desc);
     newsListEl.appendChild(card);
   }
-
 
   function makeChip(text, extraClass = '') {
     const chip = document.createElement('span');
@@ -425,42 +527,52 @@
 
   function buildFooterText(statusKind, displayItems) {
     const pinnedCount = displayItems.filter((item) => item.__pinned).length;
+    const tabLabel = getActiveTabLabel();
+    const tabPrefix = areTabsVisible() ? `${tabLabel} · ` : '';
 
     if (statusKind === 'error') {
-      return '피드 연결 실패 · fallback UI 표시 중';
+      return `${tabPrefix}피드 연결 실패 · fallback UI 표시 중`;
     }
 
     if (state.editMode) {
-      return `편집 모드 · 카드 오른쪽 상단 핀 버튼으로 고정 · 핀 ${state.pinnedEntries.length}개`;
+      return `${tabPrefix}편집 모드 · 카드 오른쪽 상단 핀 버튼으로 고정 · 핀 ${state.pinnedEntries.length}개`;
     }
 
     if (statusKind === 'warn' && state.items.length === 0 && state.pinnedEntries.length > 0) {
-      return `라이브 피드 비어 있음 · 핀 ${state.pinnedEntries.length}개 유지`;
+      return `${tabPrefix}라이브 피드 비어 있음 · 핀 ${state.pinnedEntries.length}개 유지`;
     }
 
     if (statusKind === 'warn' && displayItems.length > 0) {
-      return `마지막 성공 ${formatClock(state.lastSuccessAt)} · ${displayItems.length}개 표시${pinnedCount ? ` · 핀 ${pinnedCount}개` : ''}`;
+      return `${tabPrefix}마지막 성공 ${formatClock(state.lastSuccessAt)} · ${displayItems.length}개 표시${pinnedCount ? ` · 핀 ${pinnedCount}개` : ''}`;
     }
 
     if (statusKind === 'warn' && state.empty) {
-      return '피드가 비어 있습니다 · source 설정을 확인하세요';
+      return `${tabPrefix}피드가 비어 있습니다 · source 설정을 확인하세요`;
     }
 
     if (state.feedUpdatedAt) {
-      return `피드 기준 ${formatClock(state.feedUpdatedAt)} · ${displayItems.length}개 표시${pinnedCount ? ` · 핀 ${pinnedCount}개` : ''}`;
+      return `${tabPrefix}피드 기준 ${formatClock(state.feedUpdatedAt)} · ${displayItems.length}개 표시${pinnedCount ? ` · 핀 ${pinnedCount}개` : ''}`;
     }
 
-    return '피드 연결 확인 중…';
+    return `${tabPrefix}피드 연결 확인 중…`;
   }
 
   function formatPublishedLabel(input) {
-    if (!input) {
+    const item = input && typeof input === 'object' ? input : null;
+    const publishedAt = item ? item.publishedAt : input;
+    const publishedDate = item ? item.publishedDate : '';
+
+    if (!publishedAt && publishedDate) {
+      return formatDateOnlyLabel(publishedDate);
+    }
+
+    if (!publishedAt) {
       return '시간 미상';
     }
 
-    const date = new Date(input);
+    const date = new Date(publishedAt);
     if (Number.isNaN(date.getTime())) {
-      return '시간 미상';
+      return publishedDate ? formatDateOnlyLabel(publishedDate) : '시간 미상';
     }
 
     const diffMs = Date.now() - date.getTime();
@@ -481,6 +593,19 @@
     }
 
     return formatAbsoluteDateLabel(date);
+  }
+
+  function formatDateOnlyLabel(input) {
+    const text = String(input || '').trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) {
+      return '시간 미상';
+    }
+
+    const [, year, month, day] = match;
+    const currentYear = getTimeZonePart(new Date(), 'year');
+    const label = `${Number(month)}.${Number(day)}`;
+    return year === currentYear ? label : `${year}.${label}`;
   }
 
   function formatAbsoluteDateLabel(date) {
@@ -578,8 +703,8 @@
   }
 
   function comparePublishedDesc(left, right) {
-    const leftTime = parseTime(left?.publishedAt);
-    const rightTime = parseTime(right?.publishedAt);
+    const leftTime = parseTime(left);
+    const rightTime = parseTime(right);
 
     if (leftTime === rightTime) {
       return String(resolveDisplayTitle(left)).localeCompare(String(resolveDisplayTitle(right)), runtimeConfig.locale);
@@ -589,17 +714,34 @@
   }
 
   function parseTime(input) {
-    const date = new Date(input || 0);
-    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    const item = input && typeof input === 'object' ? input : null;
+    const value = String(item ? item.publishedAt || '' : input || '').trim();
+
+    if (value) {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) {
+        return date.getTime();
+      }
+    }
+
+    const publishedDate = String(item?.publishedDate || '').trim();
+    const match = publishedDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      // Date-only items know the calendar day, not the exact clock time.
+      // Keep them below exact timestamps from the same live-news day.
+      return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 0, 0, 0);
+    }
+
+    return 0;
   }
 
-  function loadPinnedEntries() {
+  function loadPinnedEntries(tabKey = runtimeConfig.activeTabKey) {
     if (!pinningEnabled || !window.localStorage) {
       return [];
     }
 
     try {
-      const raw = window.localStorage.getItem(runtimeConfig.pinning.storageKey);
+      const raw = window.localStorage.getItem(getPinStorageKey(tabKey));
       if (!raw) {
         return [];
       }
@@ -644,6 +786,7 @@
       title: String(base.title || '').trim(),
       titleKo: String(base.titleKo || '').trim(),
       publishedAt: String(base.publishedAt || '').trim(),
+      publishedDate: String(base.publishedDate || '').trim(),
       source: String(base.source || '').trim(),
       category: String(base.category || '').trim(),
       sentiment: String(base.sentiment || '').trim(),
@@ -663,10 +806,15 @@
         .slice(0, runtimeConfig.pinning.maxPinned || state.pinnedEntries.length);
 
       state.pinnedEntries = normalized;
-      window.localStorage.setItem(runtimeConfig.pinning.storageKey, JSON.stringify(normalized));
+      window.localStorage.setItem(getPinStorageKey(state.activeTabKey), JSON.stringify(normalized));
     } catch (error) {
       debugLog('savePinnedEntries error', error);
     }
+  }
+
+  function getPinStorageKey(tabKey) {
+    const baseKey = runtimeConfig.pinning?.storageKey || 'news-overlay-widget.pins.v1';
+    return areTabsVisible() ? `${baseKey}.${tabKey || runtimeConfig.activeTabKey}` : baseKey;
   }
 
   function togglePin(item) {
@@ -699,7 +847,7 @@
   }
 
   function getItemKey(item) {
-    return String(item?.id || item?.url || `${item?.title || ''}__${item?.publishedAt || ''}`).trim();
+    return String(item?.id || item?.url || `${item?.title || ''}__${item?.publishedAt || item?.publishedDate || ''}`).trim();
   }
 
   function resolveDisplayTitle(item) {
@@ -750,23 +898,179 @@
     const refreshMs = safeNumber(query.get('refresh'));
     const startEditMode = query.get('edit') === '1';
     const pinningEnabledOverride = query.get('pins');
+    const tabsEnabledOverride = query.get('tabs');
+
+    const sourceConfig = {
+      ...(baseConfig.source || {}),
+      ...(sourceType ? { type: sourceType } : {}),
+      ...(sourceUrl ? { url: sourceUrl } : {}),
+    };
+
+    const tabs = normalizeTabsConfig(baseConfig.tabs, sourceConfig, widgetTitle || baseConfig.widgetTitle);
+    if (tabsEnabledOverride === '0') {
+      tabs.enabled = false;
+    }
+    const requestedTabKey = normalizeKey(query.get('tab'));
+    const savedTabKey = loadSavedActiveTabKey(tabs.storageKey);
+    const activeTabKey = pickActiveTabKey(tabs, requestedTabKey || savedTabKey || tabs.defaultKey);
 
     return {
       ...baseConfig,
       widgetTitle: widgetTitle || baseConfig.widgetTitle,
       maxItems: maxItems || baseConfig.maxItems,
       refreshMs: refreshMs || baseConfig.refreshMs,
+      activeTabKey,
+      tabs,
       pinning: {
         ...(baseConfig.pinning || {}),
         ...(startEditMode ? { startInEditMode: true } : {}),
         ...(pinningEnabledOverride === '0' ? { enabled: false } : {}),
       },
-      source: {
-        ...baseConfig.source,
-        ...(sourceType ? { type: sourceType } : {}),
-        ...(sourceUrl ? { url: sourceUrl } : {}),
-      },
+      source: sourceConfig,
     };
+  }
+
+  function normalizeTabsConfig(tabsConfig, sourceConfig, widgetTitle) {
+    const config = tabsConfig && typeof tabsConfig === 'object' ? tabsConfig : {};
+    const rawItems = Array.isArray(config.items) ? config.items : [];
+    let items = rawItems
+      .map((item, index) => normalizeTabItem(item, index, sourceConfig, widgetTitle))
+      .filter(Boolean);
+
+    if (!items.length) {
+      items = [
+        normalizeTabItem(
+          {
+            key: 'default',
+            label: sourceConfig.label || 'Feed',
+            title: widgetTitle,
+            source: sourceConfig,
+          },
+          0,
+          sourceConfig,
+          widgetTitle,
+        ),
+      ].filter(Boolean);
+    }
+
+    const defaultKey = pickActiveTabKey({ items }, normalizeKey(config.defaultKey) || items[0]?.key) || items[0]?.key || 'default';
+
+    return {
+      enabled: config.enabled !== false && items.length > 1,
+      defaultKey,
+      storageKey: String(config.storageKey || 'news-overlay-widget.activeTab.v1'),
+      items,
+    };
+  }
+
+  function normalizeTabItem(rawItem, index, sourceConfig, widgetTitle) {
+    const item = rawItem && typeof rawItem === 'object' ? rawItem : {};
+    const key = normalizeKey(item.key || item.id || item.label || `tab-${index}`);
+    if (!key) {
+      return null;
+    }
+
+    const sourceOverrides = item.source && typeof item.source === 'object' ? item.source : {};
+    const source = {
+      ...sourceConfig,
+      ...sourceOverrides,
+      ...(item.url ? { url: item.url } : {}),
+      label: sourceOverrides.label || item.label || sourceConfig.label || 'Feed',
+    };
+
+    return {
+      key,
+      label: String(item.label || key).trim(),
+      title: String(item.title || widgetTitle || '').trim(),
+      source,
+    };
+  }
+
+  function normalizeKey(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-');
+  }
+
+  function pickActiveTabKey(tabs, preferredKey) {
+    const items = Array.isArray(tabs.items) ? tabs.items : [];
+    const preferred = normalizeKey(preferredKey);
+    if (preferred && items.some((item) => item.key === preferred)) {
+      return preferred;
+    }
+    return items[0]?.key || 'default';
+  }
+
+  function loadSavedActiveTabKey(storageKey) {
+    if (!storageKey || !window.localStorage) {
+      return '';
+    }
+    try {
+      return normalizeKey(window.localStorage.getItem(storageKey));
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function saveActiveTabKey(tabKey) {
+    if (!runtimeConfig.tabs?.storageKey || !window.localStorage) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(runtimeConfig.tabs.storageKey, tabKey);
+    } catch (error) {
+      debugLog('saveActiveTabKey error', error);
+    }
+  }
+
+  function getEnabledTabs() {
+    return Array.isArray(runtimeConfig.tabs?.items) ? runtimeConfig.tabs.items : [];
+  }
+
+  function areTabsVisible() {
+    return Boolean(runtimeConfig.tabs?.enabled && getEnabledTabs().length > 1);
+  }
+
+  function getTabConfig(tabKey) {
+    const key = normalizeKey(tabKey);
+    return getEnabledTabs().find((tab) => tab.key === key) || getEnabledTabs()[0] || null;
+  }
+
+  function getActiveTabConfig() {
+    return getTabConfig(state?.activeTabKey || runtimeConfig.activeTabKey);
+  }
+
+  function getActiveSourceConfig() {
+    if (!areTabsVisible()) {
+      return runtimeConfig.source || {};
+    }
+    const tab = getActiveTabConfig();
+    return tab?.source || runtimeConfig.source || {};
+  }
+
+  function createSourceForTab(tabKey) {
+    if (!areTabsVisible()) {
+      return window.NewsSourceFactory.createSource(runtimeConfig.source);
+    }
+    const tab = getTabConfig(tabKey);
+    return window.NewsSourceFactory.createSource(tab?.source || runtimeConfig.source);
+  }
+
+  function getActiveWidgetTitle() {
+    if (!areTabsVisible()) {
+      return runtimeConfig.widgetTitle || '뉴스';
+    }
+    const tab = getActiveTabConfig();
+    return tab?.title || runtimeConfig.widgetTitle || '뉴스';
+  }
+
+  function getActiveTabLabel() {
+    if (!areTabsVisible()) {
+      return 'Feed';
+    }
+    const tab = getActiveTabConfig();
+    return tab?.label || 'Feed';
   }
 
   function safeNumber(value) {

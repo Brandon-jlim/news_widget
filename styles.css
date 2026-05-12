@@ -173,6 +173,55 @@ a {
   flex: 0 0 auto;
 }
 
+.feed-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.feed-tabs[hidden] {
+  display: none;
+}
+
+.feed-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 26px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.feed-tab[aria-selected="true"] {
+  color: var(--text-main);
+  border-color: rgba(83, 211, 154, 0.30);
+  background: rgba(83, 211, 154, 0.12);
+}
+
+.feed-tab:focus-visible {
+  outline: 2px solid rgba(83, 211, 154, 0.42);
+  outline-offset: 2px;
+}
+
 .cards {
   display: flex;
   flex-direction: column;

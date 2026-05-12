@@ -10,3 +10,31 @@ __pycache__/
 # Generated runtime data/cache
 data/news.live.json
 data/translate_cache*.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local env / secrets
+.env
+.env.local
+keys/
+
+# Generated news data
+data/news.live.json
+data/news.marketaux.json
+data/news.reuters.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local env / secrets
+.env
+.env.local
+keys/
+
+# Generated news data
+data/news.live.json
+data/news.marketaux.json
+data/news.reuters.json

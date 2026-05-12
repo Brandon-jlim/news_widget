@@ -25,19 +25,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=20.0, help="API 요청 타임아웃(초)")
     parser.add_argument("--request-retries", type=int, default=2, help="실패 시 재시도 횟수")
     parser.add_argument("--retry-backoff", type=float, default=1.5, help="재시도 대기 배수")
-    parser.add_argument("--provider", choices=["marketaux"], default="marketaux")
+    parser.add_argument("--provider", choices=["marketaux", "reuters", "combined"], default="combined")
     parser.add_argument("--marketaux-mode", choices=["broad", "indices", "watchlist"], default="broad")
     parser.add_argument("--countries", default="us")
     parser.add_argument("--lang", default="en")
     parser.add_argument("--published-after", default="")
     parser.add_argument("--query", default="")
     parser.add_argument("--sort", default="")
+    parser.add_argument("--rank-mode", choices=["fresh", "balanced", "score"], default="fresh", help="최종 카드 선정 방식: fresh=최신순, balanced=점수+최신성, score=기존 점수순")
+    parser.add_argument("--reuters-feed", action="append", default=[], help="Reuters RSS/Atom/news sitemap URL 또는 로컬 XML 파일. 여러 번 지정 가능")
+    parser.add_argument("--no-reuters-default-feed", action="store_true", help="--reuters-feed 가 없을 때 기본 Reuters news sitemap을 사용하지 않습니다")
+    parser.add_argument("--reuters-fetch-limit", type=int, default=120, help="Reuters 원시 후보 기사 최대 개수")
+    parser.add_argument("--reuters-sitemap-limit", type=int, default=3, help="sitemap index에서 읽을 최신 하위 sitemap 개수")
+    parser.add_argument("--reuters-request-delay", type=float, default=0.2, help="Reuters 하위 sitemap 요청 사이 대기 시간(초)")
+    parser.add_argument("--reuters-source-label", default="Reuters")
+    parser.add_argument("--reuters-lang", default="", help="Reuters 언어 필터입니다. 기본값은 --lang 값입니다. 예: en 또는 en,ko")
+    parser.add_argument("--min-reuters-items", type=int, default=0, help="combined 모드에서 Reuters 후보를 최종 카드에 최소 몇 개 강제로 포함합니다. 기본 0은 순수 최신순입니다")
+    parser.add_argument("--allow-undated-reuters", action="store_true", help="Reuters 날짜 정보가 전혀 없는 항목도 포함합니다. 기본값은 제외입니다.")
     parser.add_argument("--translate-provider", choices=["none", "deepl"], default="deepl")
     parser.add_argument("--translate-target", default="ko")
     parser.add_argument("--translate-source", default="en")
     parser.add_argument("--translate-cache", default="data/translate_cache.ko.json")
     parser.add_argument("--translate-terms-file", default="tools/ko_terms.sample.json")
-    parser.add_argument("--out", default="data/news.live.json")
+    parser.add_argument("--out", default="data/news.live.json", help="통합 탭/기본 JSON 출력 경로")
+    parser.add_argument("--tabs", action="store_true", default=True, help="통합/Reuters/Marketaux 탭용 JSON을 함께 생성합니다")
+    parser.add_argument("--no-tabs", action="store_false", dest="tabs", help="탭용 보조 JSON 생성을 끕니다")
+    parser.add_argument("--reuters-out", default="data/news.reuters.json", help="Reuters 탭 JSON 출력 경로")
+    parser.add_argument("--marketaux-out", default="data/news.marketaux.json", help="Marketaux 탭 JSON 출력 경로")
     parser.add_argument("--min-overlay-score", type=float, default=6.5)
     parser.add_argument("--use-preferred-domains", action="store_true", default=True)
     parser.add_argument("--no-use-preferred-domains", action="store_false", dest="use_preferred_domains")
@@ -75,6 +89,10 @@ def build_relay_cmd(args: argparse.Namespace) -> list[str]:
         args.translate_terms_file,
         "--out",
         args.out,
+        "--reuters-out",
+        args.reuters_out,
+        "--marketaux-out",
+        args.marketaux_out,
         "--timeout",
         str(args.timeout),
         "--request-retries",
@@ -85,7 +103,31 @@ def build_relay_cmd(args: argparse.Namespace) -> list[str]:
         str(args.watch),
         "--min-overlay-score",
         str(args.min_overlay_score),
+        "--rank-mode",
+        args.rank_mode,
+        "--reuters-fetch-limit",
+        str(args.reuters_fetch_limit),
+        "--reuters-sitemap-limit",
+        str(args.reuters_sitemap_limit),
+        "--reuters-request-delay",
+        str(args.reuters_request_delay),
+        "--reuters-source-label",
+        args.reuters_source_label,
+        "--reuters-lang",
+        args.reuters_lang,
+        "--min-reuters-items",
+        str(args.min_reuters_items),
     ]
+
+    for feed in args.reuters_feed:
+        cmd.extend(["--reuters-feed", feed])
+    if args.no_reuters_default_feed:
+        cmd.append("--no-reuters-default-feed")
+    if args.allow_undated_reuters:
+        cmd.append("--allow-undated-reuters")
+
+    if args.tabs and args.provider == "combined":
+        cmd.append("--tab-feeds")
 
     if args.use_preferred_domains:
         cmd.append("--use-preferred-domains")
@@ -167,14 +209,19 @@ def main() -> int:
     server_proc = subprocess.Popen(server_cmd, cwd=PROJECT_ROOT, env=env)
 
     base_url = f"http://{args.host}:{args.port}/"
-    print(f"[run_overlay] overlay url: {base_url}")
-    print(f"[run_overlay] edit mode url: {base_url}?edit=1")
+    overlay_url = base_url if args.tabs else f"{base_url}?tabs=0"
+    edit_url = f"{base_url}?edit=1" if args.tabs else f"{base_url}?tabs=0&edit=1"
+    print(f"[run_overlay] overlay url: {overlay_url}")
+    print(f"[run_overlay] edit mode url: {edit_url}")
+    if args.tabs and args.provider == "combined":
+        print(f"[run_overlay] tabs: combined={args.out} reuters={args.reuters_out} marketaux={args.marketaux_out}")
+        print(f"[run_overlay] tab urls: {base_url}?tab=combined | {base_url}?tab=reuters | {base_url}?tab=marketaux")
     print(f"[run_overlay] relay refresh: every {args.watch}s")
     print("[run_overlay] stop: Ctrl+C")
 
     if args.open_browser:
         try:
-            webbrowser.open(base_url)
+            webbrowser.open(overlay_url)
         except Exception:
             pass
 
