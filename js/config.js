@@ -7,6 +7,17 @@ window.NEWS_WIDGET_CONFIG = {
   articleStaleAfterMs: 6 * 60 * 60 * 1000,
   locale: 'ko-KR',
   timeZone: 'Asia/Seoul',
+  marketTicker: {
+    enabled: true,
+    // TradingView 공식 위젯. 거래소별로 지연 또는 제공 제한이 있을 수 있습니다.
+    symbols: [
+      // 종합지수(IXIC)는 외부 위젯 제공 제한. 별도 상품인 CFD임을 표시합니다.
+      { proName: 'FOREXCOM:NAS100', title: '나스닥100 CFD' },
+      { proName: 'FX_IDC:USDKRW', title: '달러/원' },
+      { proName: 'FX_IDC:EURKRW', title: '유로/원' },
+      { proName: 'BITSTAMP:BTCUSD', title: '비트코인/USD' },
+    ],
+  },
   clickOpensArticle: true,
   linkTarget: '_blank',
   linkFallbackMode: 'none',

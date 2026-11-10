@@ -8,6 +8,7 @@
     <script defer src="js/config.js"></script>
     <script defer src="js/appearance.js"></script>
     <script defer src="widget-runtime.js"></script>
+    <script defer src="js/market-ticker.js"></script>
     <script defer src="js/translation-quality.js"></script>
     <script defer src="js/market-impact.js"></script>
     <script defer src="js/article-links.js"></script>
@@ -27,7 +28,7 @@
               <button id="view-widget" type="button" aria-pressed="false">위젯</button>
               <button id="view-panel" type="button" aria-pressed="true">패널</button>
             </div>
-            <button class="settings-open" id="settings-open" type="button" aria-haspopup="dialog" aria-controls="appearance-settings" title="테마·색상 설정">설정</button>
+            <button class="settings-open" id="settings-open" type="button" aria-haspopup="dialog" aria-controls="appearance-settings" title="시간대·테마·색상 설정">설정</button>
           </div>
         </div>
         <header class="widget-header">
@@ -44,16 +45,26 @@
           </div>
         </header>
 
-        <div class="world-clocks" aria-label="현재 한국 및 미국 동부 시각">
+        <div class="world-clocks" aria-label="선택한 두 시간대의 현재 시각">
           <div class="clock-cell">
-            <div class="clock-label"><span>한국 <b>KST</b></span><span id="clock-korea-date">--.--</span></div>
-            <time class="clock-time" id="clock-korea">--:--:--</time>
+            <div class="clock-label"><span class="clock-identity"><span class="clock-city" id="clock-left-name">한국</span><b id="clock-left-abbr">KST</b></span><span id="clock-left-date">--.--</span></div>
+            <time class="clock-time" id="clock-left">--:--:--</time>
           </div>
           <div class="clock-cell">
-            <div class="clock-label"><span>뉴욕 <b id="clock-us-zone">ET</b></span><span id="clock-us-date">--.--</span></div>
-            <time class="clock-time" id="clock-us">--:--:--</time>
+            <div class="clock-label"><span class="clock-identity"><span class="clock-city" id="clock-right-name">뉴욕</span><b id="clock-right-abbr">ET</b></span><span id="clock-right-date">--.--</span></div>
+            <time class="clock-time" id="clock-right">--:--:--</time>
           </div>
         </div>
+
+        <section class="market-ticker" id="market-ticker" data-state="loading" aria-label="시장 시세 전광판" aria-busy="true">
+          <div class="market-ticker-heading">
+            <span class="market-ticker-label">시장 시세</span>
+            <span id="market-ticker-status" role="status">연결 중…</span>
+            <button id="market-ticker-retry" type="button" hidden>다시 연결</button>
+            <a class="market-ticker-credit" href="https://kr.tradingview.com/markets/" target="_blank" rel="noopener noreferrer">TradingView <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="market-ticker-viewport" id="market-ticker-embed"></div>
+        </section>
 
         <nav class="feed-tabs" id="feed-tabs" role="tablist" aria-label="뉴스 소스 선택" hidden></nav>
 
@@ -104,7 +115,7 @@
 
         <footer class="widget-footer">
           <span id="footer-text">피드 연결 확인 중…</span>
-          <span class="footer-zone">KST</span>
+          <span class="footer-zone" id="footer-zone">한국</span>
         </footer>
       </section>
     </main>
@@ -137,7 +148,15 @@
         <h2 id="settings-title">화면 설정</h2>
         <button class="settings-close" id="settings-close" type="button" aria-label="설정 닫기">×</button>
       </div>
-      <p class="settings-description" id="settings-description">위젯과 패널에 같은 테마를 적용합니다.</p>
+      <p class="settings-description" id="settings-description">위젯과 패널의 시간대와 테마를 설정합니다.</p>
+      <fieldset class="settings-group">
+        <legend>시계 시간대</legend>
+        <label class="settings-timezone" for="clock-left-zone"><span>왼쪽 시계</span><select id="clock-left-zone" aria-describedby="clock-settings-hint"></select></label>
+        <label class="settings-timezone" for="clock-right-zone"><span>오른쪽 시계</span><select id="clock-right-zone" aria-describedby="clock-settings-hint"></select></label>
+        <p class="settings-hint" id="clock-settings-hint">서머타임은 자동 반영됩니다. 기사 발행 시각도 같은 순서로 표시하며, 하단 갱신 시각은 왼쪽 시계 기준입니다.</p>
+        <button class="text-btn clock-reset" id="clock-reset" type="button">기본 시간대 복원 · 한국 / 뉴욕</button>
+        <p class="settings-hint" id="clock-save-status" role="status">시간대를 바꾸면 자동 저장됩니다.</p>
+      </fieldset>
       <fieldset class="settings-group">
         <legend>테마 <span id="settings-theme-name">미드나이트</span></legend>
         <div class="theme-presets" id="theme-presets">

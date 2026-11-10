@@ -25,6 +25,12 @@ async function boot(payload, query = '', runtime = {}, EventSource = undefined, 
   c.window = { NEWS_WIDGET_RUNTIME: {translationPolicy:JSON.parse(fs.readFileSync(path.join(root,'translation-policy.json'),'utf8')), ...runtime}, location: { search: query }, localStorage: {getItem:k=>store.get(k)||null, setItem:(k,v)=>store.set(k,v)}, setTimeout:()=>1, clearTimeout(){}, open(){} };
   c.window.NewsArticleReader = {open(item) { c.readerItem = item; }, updateLinks() {}};
   c.window.EventSource = EventSource;
+  const windowEvents = new Map();
+  c.window.addEventListener = (name, listener) => {
+    if (!windowEvents.has(name)) windowEvents.set(name, []);
+    windowEvents.get(name).push(listener);
+  };
+  c.window.dispatchEvent = event => (windowEvents.get(event.type) || []).forEach(listener => listener(event));
   c.fetch = async url => {
     if (url === '/api/benzinga-korean') return {ok:true,json:async()=>({items:koreanItems,status:'ok'})};
     requestedUrl = url; return {ok:true,json:async()=>payload};
@@ -260,13 +266,90 @@ test('Korea and New York clocks handle dates, midnight and both DST transitions'
     ['2026-03-08T07:00:00Z','03:00:00','EDT'],
     ['2026-11-01T05:59:59Z','01:59:59','EDT'],
     ['2026-11-01T06:00:00Z','01:00:00','EST']]) {
-    assert.equal(clocks(utc).newYork.time,expected);
-    assert.equal(clocks(utc).newYork.timeZoneName,zone);
+    assert.equal(clocks(utc).right.time,expected);
+    assert.equal(clocks(utc).right.timeZoneName,zone);
   }
-  assert.equal(clocks('2026-01-01T02:03:04Z').korea.date,'01.01');
-  assert.equal(clocks('2026-01-01T02:03:04Z').newYork.date,'12.31');
-  assert.equal(clocks('2026-11-10T15:00:00Z').korea.time,'00:00:00');
-  assert.match(b.nodes.get('clock-korea').textContent,/^\d{2}:\d{2}:\d{2}$/);
+  assert.equal(clocks('2026-01-01T02:03:04Z').left.date,'01.01');
+  assert.equal(clocks('2026-01-01T02:03:04Z').right.date,'12.31');
+  assert.equal(clocks('2026-11-10T15:00:00Z').left.time,'00:00:00');
+  assert.match(b.nodes.get('clock-left').textContent,/^\d{2}:\d{2}:\d{2}$/);
+});
+
+const clockSettingsKey = 'news-overlay-widget.clocks.v1';
+function selectClock(b, side, zone) {
+  const select = b.nodes.get(`clock-${side}-zone`);
+  select.value = zone;
+  select.events.change();
+}
+
+test('clock choices persist independently and update held articles without fetching news', async () => {
+  const payload = {...fresh(), updatedAt:'2026-01-01T02:03:04Z', items:[{...headline, publishedAt:'2026-01-01T02:03:04Z'}]};
+  const b = await boot(payload);
+  b.nodes.get('pause-toggle').events.click();
+  const held = b.app.state.heldItems;
+  let requests = 0;
+  b.c.fetch = async () => { requests++; throw new Error('Unexpected fetch'); };
+  selectClock(b, 'left', 'Europe/London');
+  selectClock(b, 'right', 'America/Los_Angeles');
+  assert.equal(b.nodes.get('clock-left-name').textContent, '런던');
+  assert.equal(b.nodes.get('clock-right-name').textContent, '로스앤젤레스');
+  assert.equal(b.nodes.get('footer-zone').textContent, '런던');
+  assert.match(b.nodes.get('footer-text').textContent, /02:03/);
+  assert.match(b.nodes.get('news-list').querySelectorAll('.news-card__publication')[0].textContent, /01\.01 02:03 GMT · 12\.31 18:03 PST/);
+  assert.match(b.nodes.get('news-list').querySelectorAll('.meta-chip--time')[0].title, /런던.*로스앤젤레스/);
+  assert.equal(b.app.state.heldItems, held);
+  assert.equal(requests, 0);
+  const saved = b.c.window.localStorage.getItem(clockSettingsKey);
+  assert.deepEqual(JSON.parse(saved), {version:1, left:'Europe/London', right:'America/Los_Angeles'});
+  const restored = await boot(payload, '?view=widget', {}, undefined, {[clockSettingsKey]:saved});
+  assert.equal(restored.nodes.get('clock-left-zone').value, 'Europe/London');
+  assert.equal(restored.nodes.get('clock-right-name').textContent, '로스앤젤레스');
+});
+
+test('selected zones support DST, fractional offsets, UTC, duplicates and date-only news', async () => {
+  const b = await boot(fresh());
+  const clocks = b.c.window.NewsContext.clocks;
+  selectClock(b, 'left', 'Europe/London');
+  assert.equal(clocks('2026-03-29T00:59:59Z').left.time, '00:59:59');
+  assert.equal(clocks('2026-03-29T01:00:00Z').left.time, '02:00:00');
+  assert.equal(clocks('2026-10-25T00:59:59Z').left.time, '01:59:59');
+  assert.equal(clocks('2026-10-25T01:00:00Z').left.time, '01:00:00');
+  selectClock(b, 'left', 'Asia/Kathmandu');
+  selectClock(b, 'right', 'Australia/Adelaide');
+  assert.equal(clocks('2026-01-01T20:30:00Z').left.time, '02:15:00');
+  assert.equal(clocks('2026-01-01T20:30:00Z').left.date, '01.02');
+  assert.equal(clocks('2026-01-01T20:30:00Z').right.time, '07:00:00');
+  assert.equal(clocks('2026-07-01T20:30:00Z').right.time, '06:00:00');
+  selectClock(b, 'left', 'UTC');
+  selectClock(b, 'right', 'UTC');
+  assert.equal(clocks('2026-01-01T00:00:00Z').left.time, '00:00:00');
+  assert.deepEqual(clocks('2026-01-01T00:00:00Z').left, clocks('2026-01-01T00:00:00Z').right);
+  assert.equal(b.c.window.NewsContext.publication({publishedDate:'2026-01-01'}).text, '발행 2026-01-01 · 시각 미제공');
+});
+
+test('clock settings tolerate bad storage, synchronize changes and reset without changing themes', async () => {
+  for (const saved of ['broken', 'null', '{"version":2,"left":"UTC"}', '{"version":1,"left":"invalid/zone","right":12}']) {
+    const b = await boot(fresh(), '', {}, undefined, {[clockSettingsKey]:saved});
+    assert.equal(b.nodes.get('clock-left-zone').value, 'Asia/Seoul');
+    assert.equal(b.nodes.get('clock-right-zone').value, 'America/New_York');
+  }
+  const b = await boot(fresh(), '', {}, undefined, {[clockSettingsKey]:JSON.stringify({version:1,left:'bad',right:'UTC'})});
+  assert.equal(b.nodes.get('clock-right-zone').value, 'UTC');
+  b.c.window.dispatchEvent({type:'storage',key:clockSettingsKey,newValue:JSON.stringify({version:1,left:'Asia/Tokyo',right:'Europe/Paris'})});
+  assert.equal(b.nodes.get('clock-left-name').textContent, '도쿄');
+  assert.equal(b.nodes.get('clock-right-zone').value, 'Europe/Paris');
+  b.c.window.localStorage.setItem('news-overlay-widget.appearance.v1', 'theme sentinel');
+  b.nodes.get('clock-reset').events.click();
+  assert.equal(b.nodes.get('clock-left-name').textContent, '한국');
+  assert.equal(b.nodes.get('clock-right-name').textContent, '뉴욕');
+  assert.equal(b.c.window.localStorage.getItem('news-overlay-widget.appearance.v1'), 'theme sentinel');
+  selectClock(b, 'left', 'UTC');
+  b.c.window.dispatchEvent({type:'storage',key:null,newValue:null});
+  assert.equal(b.nodes.get('clock-left-zone').value, 'Asia/Seoul');
+  b.c.window.localStorage.setItem = () => { throw new Error('Storage blocked'); };
+  selectClock(b, 'right', 'Europe/London');
+  assert.equal(b.nodes.get('clock-right-name').textContent, '런던');
+  assert.match(b.nodes.get('clock-save-status').textContent, /이 창에 적용됨/);
 });
 
 test('publication times stay distinct from updates, date-only and absent timestamps', async () => {

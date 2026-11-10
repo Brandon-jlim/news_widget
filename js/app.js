@@ -15,11 +15,13 @@
   const viewWidgetEl = document.getElementById('view-widget');
   const viewPanelEl = document.getElementById('view-panel');
   const typeFilterEl = document.getElementById('news-type');
-  const clockKoreaEl = document.getElementById('clock-korea');
-  const clockUsEl = document.getElementById('clock-us');
-  const clockKoreaDateEl = document.getElementById('clock-korea-date');
-  const clockUsDateEl = document.getElementById('clock-us-date');
-  const clockUsZoneEl = document.getElementById('clock-us-zone');
+  const footerZoneEl = document.getElementById('footer-zone');
+  const clockElements = Object.fromEntries(['left', 'right'].map(side => [side, {
+    time: document.getElementById(`clock-${side}`),
+    date: document.getElementById(`clock-${side}-date`),
+    name: document.getElementById(`clock-${side}-name`),
+    abbreviation: document.getElementById(`clock-${side}-abbr`),
+  }]));
 
   const defaultConfig = window.NEWS_WIDGET_CONFIG || {};
   const runtimeConfig = resolveRuntimeConfig(defaultConfig);
@@ -63,6 +65,11 @@
     connectEvents();
     scheduleClockRefresh();
     updateWallClocks();
+    window.NewsContext.clockSettings.subscribe(() => {
+      updateWallClocks();
+      state.renderKey = null;
+      render();
+    });
     window.NewsArticleLinks.watch(() => { state.renderKey = null; render(); window.NewsArticleReader.updateLinks(); });
 
     document.addEventListener('visibilitychange', () => {
@@ -274,18 +281,21 @@
   function updateWallClocks() {
     if (state.wallClockTimerId) window.clearTimeout(state.wallClockTimerId);
     const now = new Date();
-    const {korea, newYork} = window.NewsContext.clocks(now);
-    if (clockKoreaEl) {
-      clockKoreaEl.textContent = korea.time;
-      clockKoreaEl.setAttribute('datetime', now.toISOString());
+    for (const [side, clock] of Object.entries(window.NewsContext.clocks(now))) {
+      const elements = clockElements[side];
+      elements.time.textContent = clock.time;
+      elements.time.setAttribute('datetime', now.toISOString());
+      elements.time.setAttribute('aria-label', `${side === 'left' ? '왼쪽' : '오른쪽'} 시계 · ${clock.name} ${clock.year}.${clock.date} ${clock.time} ${clock.timeZoneName}`);
+      elements.time.title = clock.zone;
+      elements.date.textContent = clock.date;
+      elements.name.textContent = clock.name;
+      elements.name.title = `${clock.name} · ${clock.zone}`;
+      elements.abbreviation.textContent = clock.timeZoneName;
+      if (side === 'left') {
+        footerZoneEl.textContent = clock.name;
+        footerZoneEl.title = `왼쪽 시계 기준 · ${clock.zone}`;
+      }
     }
-    if (clockUsEl) {
-      clockUsEl.textContent = newYork.time;
-      clockUsEl.setAttribute('datetime', now.toISOString());
-    }
-    if (clockKoreaDateEl) clockKoreaDateEl.textContent = korea.date;
-    if (clockUsDateEl) clockUsDateEl.textContent = newYork.date;
-    if (clockUsZoneEl) clockUsZoneEl.textContent = newYork.timeZoneName;
     state.wallClockTimerId = window.setTimeout(updateWallClocks, 1000 - (Date.now() % 1000) + 10);
   }
 
@@ -535,7 +545,7 @@
         meta.appendChild(chip);
       }
       const timeChip = makeChip(formatPublishedLabel(item), 'meta-chip--time');
-      if (item.publishedAt) timeChip.title = `${formatAbsoluteDateLabel(new Date(item.publishedAt))} KST`;
+      if (item.publishedAt) timeChip.title = window.NewsContext.publication(item).detail;
       meta.appendChild(timeChip);
 
       if (isPinned) {
@@ -757,7 +767,7 @@
 
   function getTimeZonePart(date, partType) {
     const parts = new Intl.DateTimeFormat(runtimeConfig.locale, {
-      timeZone: runtimeConfig.timeZone,
+      timeZone: window.NewsContext.clockSettings.get().left,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -781,7 +791,7 @@
     }
 
     return new Intl.DateTimeFormat(runtimeConfig.locale, {
-      timeZone: runtimeConfig.timeZone,
+      timeZone: window.NewsContext.clockSettings.get().left,
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
@@ -873,7 +883,7 @@
   }
 
   function loadPinnedEntries(tabKey = runtimeConfig.activeTabKey) {
-    if (!pinningEnabled || !window.localStorage) {
+    if (!pinningEnabled) {
       return [];
     }
 
@@ -945,7 +955,7 @@
   }
 
   function savePinnedEntries() {
-    if (!pinningEnabled || !window.localStorage) {
+    if (!pinningEnabled) {
       return;
     }
 
@@ -1151,7 +1161,7 @@
   }
 
   function loadSavedActiveTabKey(storageKey) {
-    if (!storageKey || !window.localStorage) {
+    if (!storageKey) {
       return '';
     }
     try {
@@ -1162,7 +1172,7 @@
   }
 
   function saveActiveTabKey(tabKey) {
-    if (!runtimeConfig.tabs?.storageKey || !window.localStorage) {
+    if (!runtimeConfig.tabs?.storageKey) {
       return;
     }
     try {
