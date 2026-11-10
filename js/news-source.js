@@ -71,11 +71,13 @@
     return {
       id: normalizeText(rawItem.id || rawItem.uuid || rawItem.guid || rawItem.url || rawItem.link || `${title}-${publishedDate?.toISOString?.() ?? publishedDateOnly}`),
       title: titleKo || title || '제목 없음',
+      originalTitle: title,
       titleKo: titleKo || '',
       translationStatus: normalizeText(rawItem.translationStatus || ''),
       official: Boolean(rawItem.official),
       contentKind: normalizeText(rawItem.contentKind || ''),
       firstSeenAt: normalizeText(rawItem.firstSeenAt || ''),
+      symbols: (Array.isArray(rawItem.entities) ? rawItem.entities : []).map(entity => normalizeText(entity?.symbol)).filter(Boolean),
       publishedAt: publishedDate ? publishedDate.toISOString() : null,
       publishedDate: publishedDateOnly || '',
       source: normalizeText(rawItem.source || rawItem.provider || rawItem.feedTitle || fallbackSourceLabel || 'Feed'),

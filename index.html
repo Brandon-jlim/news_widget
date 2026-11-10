@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>미국 증시 뉴스 오버레이</title>
+    <title>Market Brief · 미국 증시 뉴스</title>
     <link rel="stylesheet" href="styles.css" />
     <script defer src="js/config.js"></script>
     <script defer src="widget-runtime.js"></script>
@@ -13,19 +13,22 @@
   </head>
   <body>
     <main class="overlay-shell">
-      <section class="news-widget" id="news-widget" data-status="loading" data-edit-mode="false" aria-live="polite">
+      <section class="news-widget" id="news-widget" data-status="loading" data-edit-mode="false" data-view="panel" aria-label="미국 증시 뉴스">
+        <div class="widget-topline">
+          <p class="eyebrow"><span class="brand-mark" aria-hidden="true"></span>MARKET BRIEF</p>
+          <div class="view-switch" role="group" aria-label="화면 크기">
+            <button id="view-widget" type="button" aria-pressed="false">위젯</button>
+            <button id="view-panel" type="button" aria-pressed="true">패널</button>
+          </div>
+        </div>
         <header class="widget-header">
           <div class="widget-header__main">
-            <p class="eyebrow">LIVE OVERLAY</p>
             <h1 class="widget-title" id="widget-title">미국 증시 뉴스</h1>
+            <p class="widget-subtitle">시장의 흐름을 한눈에 <span>· KST</span></p>
           </div>
 
           <div class="widget-actions">
-            <div class="widget-action-row">
-              <button class="toolbar-btn" id="edit-toggle" type="button" aria-pressed="false">편집</button>
-              <button class="toolbar-btn toolbar-btn--ghost" id="clear-pins" type="button" hidden>핀 초기화</button>
-            </div>
-            <div class="status-badge" id="status-badge">
+            <div class="status-badge" id="status-badge" role="status">
               <span class="status-dot" aria-hidden="true"></span>
               <span id="status-text">불러오는 중</span>
             </div>
@@ -34,7 +37,21 @@
 
         <nav class="feed-tabs" id="feed-tabs" role="tablist" aria-label="뉴스 소스 선택" hidden></nav>
 
-        <div class="cards" id="news-list">
+        <div class="reader-toolbar">
+          <label class="search-field"><span aria-hidden="true">⌕</span><input id="news-search" type="search" placeholder="뉴스·종목 검색" aria-label="현재 피드의 뉴스·종목 검색" autocomplete="off" /></label>
+          <button class="toolbar-btn font-toggle" id="font-toggle" type="button" aria-label="글자 크기: 기본. 누르면 크게 표시">가＋</button>
+          <button class="toolbar-btn" id="pause-toggle" type="button" aria-pressed="false" title="화면 목록만 고정합니다. 뉴스 수집은 계속됩니다.">읽기 고정</button>
+        </div>
+        <div class="list-heading">
+          <span id="list-count">최신 뉴스</span>
+          <div class="widget-action-row">
+            <button class="text-btn" id="edit-toggle" type="button" aria-pressed="false">핀 관리</button>
+            <button class="text-btn text-btn--muted" id="clear-pins" type="button" hidden>모두 해제</button>
+          </div>
+        </div>
+        <button class="new-news-button" id="new-news" type="button" hidden aria-live="polite">최신 뉴스로 돌아가기 ↑</button>
+
+        <div class="cards" id="news-list" role="tabpanel" aria-label="뉴스 목록" tabindex="0">
           <article class="news-card skeleton-card" aria-hidden="true">
             <div class="news-card__meta skeleton-line"></div>
             <div class="news-card__title skeleton-block"></div>
@@ -54,6 +71,7 @@
 
         <footer class="widget-footer">
           <span id="footer-text">피드 연결 확인 중…</span>
+          <span class="footer-zone">KST</span>
         </footer>
       </section>
     </main>

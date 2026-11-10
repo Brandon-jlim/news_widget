@@ -7,6 +7,13 @@
   const editToggleEl = document.getElementById('edit-toggle');
   const clearPinsEl = document.getElementById('clear-pins');
   const feedTabsEl = document.getElementById('feed-tabs');
+  const searchEl = document.getElementById('news-search');
+  const pauseEl = document.getElementById('pause-toggle');
+  const newNewsEl = document.getElementById('new-news');
+  const fontEl = document.getElementById('font-toggle');
+  const countEl = document.getElementById('list-count');
+  const viewWidgetEl = document.getElementById('view-widget');
+  const viewPanelEl = document.getElementById('view-panel');
 
   const defaultConfig = window.NEWS_WIDGET_CONFIG || {};
   const runtimeConfig = resolveRuntimeConfig(defaultConfig);
@@ -31,6 +38,10 @@
     activeTabKey: runtimeConfig.activeTabKey,
     editMode: pinningEnabled && Boolean(runtimeConfig.pinning?.startInEditMode),
     pinnedEntries: loadPinnedEntries(runtimeConfig.activeTabKey),
+    view: runtimeConfig.view,
+    largeText: readPreference('largeText') === 'true',
+    search: '',
+    heldItems: null,
   };
 
   titleEl.textContent = getActiveWidgetTitle();
@@ -65,6 +76,26 @@
   }
 
   function setupToolbar() {
+    searchEl?.addEventListener('input', () => {
+      state.search = searchEl.value.trim().toLowerCase();
+      newsListEl.scrollTop = 0;
+      render();
+    });
+    pauseEl?.addEventListener('click', () => {
+      if (state.heldItems) resumeNews();
+      else holdNews();
+    });
+    newNewsEl?.addEventListener('click', resumeNews);
+    fontEl?.addEventListener('click', () => {
+      state.largeText = !state.largeText;
+      savePreference('largeText', String(state.largeText));
+      render();
+    });
+    viewWidgetEl?.addEventListener('click', () => setView('widget'));
+    viewPanelEl?.addEventListener('click', () => setView('panel'));
+    newsListEl.addEventListener('scroll', () => {
+      if (newsListEl.scrollTop > 80 && !state.heldItems && state.items.length) holdNews();
+    });
     if (editToggleEl) {
       editToggleEl.hidden = !pinningEnabled;
       editToggleEl.addEventListener('click', () => {
@@ -87,6 +118,43 @@
     }
   }
 
+  function readPreference(key) {
+    try { return window.localStorage?.getItem(`news-overlay-widget.reader.${key}`) || ''; }
+    catch { return ''; }
+  }
+
+  function savePreference(key, value) {
+    try { window.localStorage?.setItem(`news-overlay-widget.reader.${key}`, value); }
+    catch { /* Browsing remains usable when storage is unavailable. */ }
+  }
+
+  function setView(view) {
+    state.view = view;
+    savePreference('view', view);
+    syncLocation();
+    newsListEl.scrollTop = 0;
+    render();
+  }
+
+  function syncLocation() {
+    const query = new URLSearchParams(window.location.search);
+    query.set('view', state.view);
+    if (areTabsVisible()) query.set('tab', state.activeTabKey);
+    window.history?.replaceState(null, '', `?${query.toString()}`);
+  }
+
+  function holdNews() {
+    if (!state.items.length) return;
+    state.heldItems = state.items.slice();
+    render();
+  }
+
+  function resumeNews() {
+    state.heldItems = null;
+    newsListEl.scrollTop = 0;
+    render();
+  }
+
   function setupTabs() {
     const tabs = getEnabledTabs();
     if (!feedTabsEl) {
@@ -106,6 +174,16 @@
       button.dataset.tabKey = tab.key;
       button.textContent = tab.label;
       button.addEventListener('click', () => switchFeedTab(tab.key));
+      button.addEventListener('keydown', event => {
+        const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        event.preventDefault();
+        const current = tabs.findIndex(item => item.key === tab.key);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+          : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+        switchFeedTab(tabs[next].key);
+        document.getElementById(`feed-tab-${tabs[next].key}`)?.focus();
+      });
       feedTabsEl.appendChild(button);
     });
 
@@ -118,6 +196,7 @@
     }
 
     feedTabsEl.hidden = false;
+    newsListEl.setAttribute('aria-labelledby', `feed-tab-${state.activeTabKey}`);
     Array.from(feedTabsEl.querySelectorAll('.feed-tab')).forEach((button) => {
       const selected = button.dataset.tabKey === state.activeTabKey;
       button.setAttribute('aria-selected', String(selected));
@@ -143,6 +222,8 @@
     state.requestInFlight = false;
     state.currentAbortController = null;
     state.activeTabKey = tab.key;
+    state.heldItems = null;
+    newsListEl.scrollTop = 0;
     state.items = [];
     state.feedUpdatedAt = null;
     state.feedMeta = {};
@@ -154,6 +235,7 @@
     state.editMode = pinningEnabled && state.editMode;
 
     saveActiveTabKey(tab.key);
+    syncLocation();
     source = createSourceForTab(tab.key);
     connectEvents();
     titleEl.textContent = getActiveWidgetTitle();
@@ -250,13 +332,16 @@
     titleEl.textContent = getActiveWidgetTitle();
     widgetEl.dataset.status = status.kind;
     widgetEl.dataset.editMode = String(state.editMode);
+    widgetEl.dataset.view = state.view;
+    widgetEl.dataset.largeText = String(state.largeText);
+    widgetEl.dataset.reading = String(Boolean(state.heldItems));
     statusTextEl.textContent = status.label;
     footerTextEl.textContent = buildFooterText(status.kind, displayItems);
 
     updateTabs();
     updateToolbar();
 
-    const renderKey = JSON.stringify([displayItems, status.kind, state.editMode, Math.floor(Date.now() / 60_000)]);
+    const renderKey = JSON.stringify([displayItems, status.kind, state.editMode, state.search, Math.floor(Date.now() / 60_000)]);
     if (renderKey === state.renderKey && displayItems.length > 0) return;
     if (!state.loading || displayItems.length > 0) state.renderKey = renderKey;
 
@@ -274,9 +359,29 @@
   }
 
   function updateToolbar() {
+    const paused = Boolean(state.heldItems);
+    const heldKeys = new Set((state.heldItems || []).map(getItemKey));
+    const incoming = paused ? state.items.filter(item => !heldKeys.has(getItemKey(item))).length : 0;
+    if (pauseEl) {
+      pauseEl.setAttribute('aria-pressed', String(paused));
+      pauseEl.textContent = paused ? '고정 해제' : '읽기 고정';
+      pauseEl.disabled = !state.items.length && !paused;
+    }
+    if (newNewsEl) {
+      newNewsEl.hidden = !paused;
+      newNewsEl.textContent = incoming ? `새 뉴스 ${incoming}개 · 최신으로 ↑` : '읽는 중 · 최신 뉴스로 돌아가기 ↑';
+    }
+    if (fontEl) {
+      fontEl.setAttribute('aria-pressed', String(state.largeText));
+      fontEl.setAttribute('aria-label', state.largeText ? '글자 크기: 크게. 누르면 기본 크기' : '글자 크기: 기본. 누르면 크게 표시');
+      fontEl.textContent = state.largeText ? '가－' : '가＋';
+    }
+    viewWidgetEl?.setAttribute('aria-pressed', String(state.view === 'widget'));
+    viewPanelEl?.setAttribute('aria-pressed', String(state.view === 'panel'));
+    if (countEl) countEl.textContent = `${state.search ? '검색 결과' : paused ? '읽는 중' : '최신순'} · ${getDisplayItems().length}개`;
     if (editToggleEl) {
       editToggleEl.setAttribute('aria-pressed', String(state.editMode));
-      editToggleEl.textContent = state.editMode ? '완료' : '편집';
+      editToggleEl.textContent = state.editMode ? '완료' : '핀 관리';
     }
 
     if (clearPinsEl) {
@@ -336,6 +441,10 @@
   }
 
   function renderCards(items, isStale) {
+    const scrollPosition = newsListEl.scrollTop;
+    const focusedCard = document.activeElement?.closest?.('.news-card');
+    const focusedKey = focusedCard?.dataset.key;
+    const focusedPin = document.activeElement?.classList?.contains('news-card__action-btn');
     newsListEl.innerHTML = '';
 
     items.forEach((item, index) => {
@@ -352,6 +461,7 @@
         .filter(Boolean)
         .join(' ');
       card.dataset.clickable = String(Boolean(hasUrl && !state.editMode && runtimeConfig.clickOpensArticle));
+      card.dataset.key = getItemKey(item);
       card.setAttribute('title', resolveDisplayTitle(item));
 
       if (pinningEnabled) {
@@ -361,7 +471,7 @@
         const pinButton = document.createElement('button');
         pinButton.type = 'button';
         pinButton.className = `news-card__action-btn ${isPinned ? 'is-active' : ''}`.trim();
-        pinButton.textContent = isPinned ? '해제' : '핀';
+        pinButton.textContent = isPinned ? '고정됨' : '고정';
         pinButton.setAttribute('aria-pressed', String(isPinned));
         pinButton.title = isPinned ? '고정 해제' : '이 카드를 맨 위에 고정';
         pinButton.addEventListener('click', (event) => {
@@ -377,10 +487,15 @@
       const meta = document.createElement('div');
       meta.className = 'news-card__meta';
       const sentiment = resolveSentiment(item);
-      if (runtimeConfig.sentiment?.enabled !== false) {
+      if (item.source) meta.appendChild(makeChip(item.source, 'meta-chip--source'));
+      const age = item.publishedAt ? Date.now() - new Date(item.publishedAt).getTime() : Infinity;
+      if (age >= 0 && age < 300_000) meta.appendChild(makeChip('최근 5분', 'meta-chip--fresh'));
+      if (runtimeConfig.sentiment?.enabled !== false && sentiment !== 'neutral') {
         meta.appendChild(makeSentimentChip(sentiment));
       }
-      meta.appendChild(makeChip(formatPublishedLabel(item)));
+      const timeChip = makeChip(formatPublishedLabel(item), 'meta-chip--time');
+      if (item.publishedAt) timeChip.title = `${formatAbsoluteDateLabel(new Date(item.publishedAt))} KST`;
+      meta.appendChild(timeChip);
 
       if (isPinned) {
         meta.appendChild(makeChip(isLivePinned ? 'PIN' : 'PIN 보존', 'meta-chip--pin'));
@@ -388,10 +503,6 @@
 
       if (item.category) {
         meta.appendChild(makeChip(item.category));
-      }
-
-      if (item.source) {
-        meta.appendChild(makeChip(item.source));
       }
 
       if (isStale) {
@@ -431,7 +542,6 @@
       }
 
       if (hasUrl && runtimeConfig.clickOpensArticle && !state.editMode) {
-        card.tabIndex = 0;
         card.addEventListener('click', (event) => {
           if (isInteractiveTarget(event.target)) {
             return;
@@ -439,6 +549,7 @@
           openArticle(item);
         });
         card.addEventListener('keydown', (event) => {
+          if (isInteractiveTarget(event.target)) return;
           if (event.key !== 'Enter' && event.key !== ' ') {
             return;
           }
@@ -451,6 +562,12 @@
       card.appendChild(titleNode);
       newsListEl.appendChild(card);
     });
+    if (state.heldItems) newsListEl.scrollTop = scrollPosition;
+    if (focusedKey) {
+      const card = Array.from(newsListEl.children).find(node => node.dataset.key === focusedKey);
+      const target = focusedPin ? card?.querySelector('.news-card__action-btn') : card?.querySelector('.news-card__title-link');
+      target?.focus({preventScroll: true});
+    }
   }
 
   function renderFallbackCard() {
@@ -461,11 +578,11 @@
 
     const title = document.createElement('h2');
     title.className = 'news-card__title';
-    title.textContent = state.lastError ? '뉴스 피드를 불러오지 못했습니다' : runtimeConfig.emptyTitle;
+    title.textContent = state.search ? '검색 결과가 없습니다' : state.lastError ? '뉴스 피드를 불러오지 못했습니다' : runtimeConfig.emptyTitle;
 
     const desc = document.createElement('p');
     desc.className = 'news-card__desc';
-    desc.textContent = state.lastError || runtimeConfig.emptyMessage;
+    desc.textContent = state.search ? '다른 키워드를 입력하거나 검색어를 지워 주세요.' : state.lastError || runtimeConfig.emptyMessage;
 
     card.appendChild(title);
     card.appendChild(desc);
@@ -715,7 +832,7 @@
   }
 
   function getDisplayItems() {
-    const liveItems = state.items.slice().sort(comparePublishedDesc);
+    const liveItems = (state.heldItems || state.items).slice().sort(comparePublishedDesc);
     const liveMap = new Map(liveItems.map((item) => [getItemKey(item), item]));
 
     const pinnedItems = state.pinnedEntries
@@ -741,7 +858,11 @@
     const pinnedKeySet = new Set(pinnedItems.map((item) => item.__pinKey || getItemKey(item)));
     const remainingItems = liveItems.filter((item) => !pinnedKeySet.has(getItemKey(item)));
 
-    return [...pinnedItems, ...remainingItems].slice(0, runtimeConfig.maxItems);
+    const matched = [...pinnedItems, ...remainingItems].filter(item => !state.search ||
+      [item.title, item.titleKo, item.originalTitle, item.source, item.category, ...(item.symbols || [])]
+        .join(' ').toLowerCase().includes(state.search));
+    const limit = runtimeConfig.explicitLimit || (state.view === 'widget' ? Math.min(5, runtimeConfig.maxItems) : runtimeConfig.maxItems);
+    return matched.slice(0, limit);
   }
 
   function comparePublishedDesc(left, right) {
@@ -827,6 +948,8 @@
       id: String(base.id || '').trim(),
       title: String(base.title || '').trim(),
       titleKo: String(base.titleKo || '').trim(),
+      originalTitle: String(base.originalTitle || '').trim(),
+      symbols: Array.isArray(base.symbols) ? base.symbols.map(String) : [],
       translationStatus: String(base.translationStatus || '').trim(),
       official: Boolean(base.official),
       contentKind: String(base.contentKind || '').trim(),
@@ -1004,6 +1127,7 @@
     const sourceUrl = query.get('url');
     const widgetTitle = query.get('title');
     const maxItems = safeNumber(query.get('limit'));
+    const requestedView = query.get('view') || readPreference('view');
     const refreshMs = safeNumber(query.get('refresh'));
     const startEditMode = query.get('edit') === '1';
     const pinningEnabledOverride = query.get('pins');
@@ -1027,6 +1151,8 @@
       ...baseConfig,
       widgetTitle: widgetTitle || baseConfig.widgetTitle,
       maxItems: maxItems || serverConfig.maxItems || baseConfig.maxItems,
+      explicitLimit: maxItems,
+      view: requestedView === 'widget' ? 'widget' : 'panel',
       refreshMs: refreshMs || baseConfig.refreshMs,
       activeTabKey,
       tabs,

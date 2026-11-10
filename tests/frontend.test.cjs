@@ -188,3 +188,58 @@ test('public RSS tab preserves press-release labeling when pinned and uses SSE',
   b.app.togglePin(b.app.state.items[0]);
   assert.equal(b.app.state.pinnedEntries[0].item.contentKind, 'press_release');
 });
+
+test('widget and panel modes change visible count while preserving explicit limits', async () => {
+  const payload = {...fresh(),items:Array.from({length:12},(_,i)=>({...headline,id:String(i)}))};
+  const b = await boot(payload, '?view=widget', {maxItems:30});
+  assert.equal(b.nodes.get('news-list').children.length,5);
+  b.nodes.get('view-panel').events.click();
+  assert.equal(b.nodes.get('news-list').children.length,12);
+  assert.equal(b.c.window.localStorage.getItem('news-overlay-widget.reader.view'),'panel');
+  const explicit = await boot(payload,'?view=widget&limit=8',{maxItems:30});
+  assert.equal(explicit.nodes.get('news-list').children.length,8);
+});
+
+test('reading hold buffers incoming news, retains its snapshot and exposes provider failure', async () => {
+  const payload=fresh();
+  const b=await boot(payload);
+  b.nodes.get('pause-toggle').events.click();
+  payload.items.unshift({...headline,id:'2',titleKo:'새로 도착한 뉴스'});
+  payload.meta.source_statuses={massive:{status:'error',label:'Benzinga',error:'HTTP 503'}};
+  await b.app.refreshNews();
+  assert.equal(b.app.state.items.length,2);
+  assert.equal(b.nodes.get('news-list').children.length,1);
+  assert.equal(b.nodes.get('new-news').textContent,'새 뉴스 1개 · 최신으로 ↑');
+  assert.match(b.status(),/수집 실패/);
+  b.nodes.get('new-news').events.click();
+  assert.equal(b.nodes.get('news-list').children.length,2);
+  assert.equal(b.app.state.heldItems,null);
+  assert.equal(b.nodes.get('new-news').hidden,true);
+});
+
+test('search matches Korean, original English and ticker symbols without fetching another feed', async () => {
+  const payload=fresh();
+  payload.items[0]={...headline,title:'Nvidia raises outlook',titleKo:'엔비디아 전망 상향',entities:[null,{}, {symbol:'NVDA'}]};
+  const b=await boot(payload);
+  const input=b.nodes.get('news-search');
+  for(const term of ['엔비디아','Nvidia','nvda']) {
+    input.value=term; input.events.input();
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link').length,1);
+  }
+  input.value='missing phrase'; input.events.input();
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title')[0].textContent,'검색 결과가 없습니다');
+  input.value=''; input.events.input();
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link').length,1);
+});
+
+test('scrolling holds the list, changing tabs releases it and text size persists', async () => {
+  const b=await boot(fresh());
+  b.nodes.get('news-list').scrollTop=120;
+  b.nodes.get('news-list').events.scroll();
+  assert.ok(b.app.state.heldItems);
+  b.app.switchFeedTab('benzinga'); await new Promise(setImmediate);
+  assert.equal(b.app.state.heldItems,null);
+  b.nodes.get('font-toggle').events.click();
+  assert.equal(b.nodes.get('news-widget').dataset.largeText,'true');
+  assert.equal(b.c.window.localStorage.getItem('news-overlay-widget.reader.largeText'),'true');
+});
