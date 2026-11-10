@@ -1,0 +1,54 @@
+name: Windows portable build
+on:
+  push:
+    branches: [build/windows]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test application
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/*.test.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build without private keys
+        shell: pwsh
+        run: |
+          python -m pip install -r packaging/requirements-build.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python packaging/build_windows.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test packaged executable without Python on PATH
+        run: python packaging/smoke_windows.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MarketBrief-Windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/windows-smoke-report.json
+      - name: Publish key-free build for download
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "windows-build-${{ github.run_id }}"
+          $notes = "Windows x64 portable build. API keys are NOT included. Extract the entire ZIP, fill keys/*.txt and run MarketBrief.exe. Packaged EXE smoke tests are included."
+          $assets = Get-ChildItem dist -File | Where-Object { $_.Extension -in '.zip', '.sha256', '.json' } | ForEach-Object { $_.FullName }
+          gh release create $tag @assets --target "${{ github.sha }}" --prerelease --title "Windows portable build ${{ github.run_id }}" --notes $notes

@@ -3,6 +3,7 @@ import io
 import socket
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from test_pipeline import run_overlay
@@ -39,7 +40,7 @@ class LauncherTests(unittest.TestCase):
         events = []
 
         def spawn(command, **kwargs):
-            events.append(command[1].rsplit("/", 1)[-1])
+            events.append(Path(command[1]).name)
             return server if len(events) == 1 else relay
 
         def ready(*args):

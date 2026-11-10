@@ -28,11 +28,13 @@ try:
     from .feed_sources import OFFICIAL_FEEDS, PUBLIC_RSS_FEEDS
     from .translation_quality import inspect_translation, review_record
     from .market_impact import attach_impact, assess_impact
+    from .app_paths import DATA_ROOT
 except ImportError:
     from storage import atomic_write_json, read_json
     from feed_sources import OFFICIAL_FEEDS, PUBLIC_RSS_FEEDS
     from translation_quality import inspect_translation, review_record
     from market_impact import attach_impact, assess_impact
+    from app_paths import DATA_ROOT
 
 
 # Keep an application identifier, but use a browser-compatible User-Agent shape.
@@ -42,7 +44,7 @@ USER_AGENT = "Mozilla/5.0 (compatible; NewsOverlayWidget/1.0; metadata-only)"
 HTTP_PATTERN = re.compile(r"^https?://", re.IGNORECASE)
 TAG_PATTERN = re.compile(r"<[^>]+>")
 SECRET_QUERY_PARAM_PATTERN = re.compile(r"(?i)([?&](?:api_token|api_key|apikey|auth_key|token|key)=)([^&]+)")
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = DATA_ROOT
 DEFAULT_KEYS_DIR = PROJECT_ROOT / "keys"
 DEFAULT_MARKETAUX_KEY_FILES = (
     DEFAULT_KEYS_DIR / "marketaux_token.txt",
@@ -1329,7 +1331,7 @@ def extract_secret_from_text(text: str) -> str:
                 return candidate
         else:
             return line.strip().strip('"').strip("'")
-    return clean_text(text)
+    return ""
 
 
 def load_secret_from_file(path_text: str | Path | None) -> tuple[str, str]:
@@ -1339,8 +1341,10 @@ def load_secret_from_file(path_text: str | Path | None) -> tuple[str, str]:
     if not path.exists() or not path.is_file():
         return "", ""
     try:
-        value = extract_secret_from_text(path.read_text(encoding="utf-8"))
-    except OSError:
+        raw = path.read_bytes()
+        encoding = 'utf-16' if raw.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig'
+        value = extract_secret_from_text(raw.decode(encoding))
+    except (OSError, UnicodeError):
         return "", ""
     return value, str(path)
 

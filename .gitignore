@@ -16,3 +16,9 @@ data/news.official.json
 data/news.rss.json
 data/news.benzinga.json
 data/translate_cache*.json
+data/.desktop.lock
+logs/
+build/
+dist/
+delivery/
+*.zip

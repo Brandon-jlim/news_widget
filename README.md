@@ -1,10 +1,36 @@
 # 미국 증시 뉴스 위젯
 
-현재 버전: **v1.7.0 — 뉴스 표시 개수 설정**. 버전별 변경 사항은 [CHANGELOG.md](CHANGELOG.md)에 기록합니다.
+현재 버전: **v1.8.0 — Windows 실행 파일 배포**. 버전별 변경 사항은 [CHANGELOG.md](CHANGELOG.md)에 기록합니다.
 
 방송 진행자가 별도 로컬 화면에서 미국 증시 관련 뉴스를 확인하는 위젯입니다. **Massive의 Benzinga News REST API**를 주력으로 사용하고 연준·BLS·BEA·SEC·EIA 공식 발표, CNBC·PR Newswire RSS를 함께 모읍니다. Marketaux와 Benzinga 직접 스트림도 선택적으로 지원합니다. 한국어 제목은 DeepL로 번역합니다. 현재 사용 범위는 시청자에게 송출하지 않는 진행자 전용 열람입니다.
 
-## 실행
+## Windows 실행 파일로 사용
+
+Windows 10/11 64비트용 ZIP의 **전체 압축을 푼 뒤 `MarketBrief.exe`를 더블클릭**합니다. Python 설치나 명령어 입력 없이 기본 브라우저에 `?view=widget&tab=combined` 화면이 자동으로 열립니다. 실행 창의 **위젯 열기**로 화면을 다시 열고 **종료** 또는 창 닫기로 뉴스 수집을 끝냅니다. 브라우저 탭만 닫으면 수집은 계속됩니다.
+
+API 키는 EXE 옆 `keys/massive_api_key.txt`, `keys/deepl_api_key.txt`에서 자동으로 읽습니다. 키를 포함해 개별 전달받은 ZIP은 바로 실행하면 됩니다. 공개 GitHub 빌드에는 빈 TXT 파일만 들어 있으므로 키를 한 줄씩 저장한 뒤 실행해야 합니다. 메모장의 UTF-8·UTF-8 BOM·UTF-16을 지원합니다. 키를 포함한 파일은 공개 저장소·릴리스에 올리지 않습니다.
+
+`_internal` 폴더는 Python·Tcl/Tk·앱 파일을 포함하므로 EXE와 같이 유지합니다. 뉴스·번역 캐시와 진단 로그는 EXE 옆 `data`, `logs`에 저장됩니다. 바탕 화면·문서처럼 쓰기 가능한 위치에 압축을 풀어야 하며 인터넷 연결이 필요합니다. 중복 실행은 추가 수집기를 만들지 않고 기존 위젯을 엽니다. 실행 창이 강제로 종료돼도 백그라운드 수집기가 남지 않도록 부모 프로세스를 감시합니다.
+
+### Windows 배포본 빌드
+
+[PyInstaller](https://pyinstaller.org/en/stable/operating-mode.html)는 대상 OS에서 빌드해야 합니다. Windows Python 환경에서 다음을 실행하거나 `.github/workflows/windows-portable.yml`을 사용합니다.
+
+```powershell
+python -m pip install -r packaging/requirements-build.txt
+python packaging/build_windows.py
+python packaging/smoke_windows.py
+```
+
+빌드 결과는 `dist/MarketBrief-v<버전>-Windows-x64.zip`이며 개인 키·뉴스 캐시·로그를 포함하지 않습니다. 자동 검증은 EXE를 한글·공백 경로로 옮기고 Python을 PATH에서 제외한 상태에서 시작·종료, 자식 프로세스 정리, 중복 실행 방지, 키 파일 HTTP 차단과 실제 GUI 창 닫기를 확인합니다. 유료 뉴스·번역 서비스에는 요청하지 않습니다. Windows Actions 빌드는 키가 없는 ZIP과 검증 결과만 빌드용 사전 릴리스에 게시합니다.
+
+승인받은 키를 포함한 전달본은 공개 빌드를 내려받은 후 **로컬에서만** 만듭니다. 출력 파일은 Git에서 제외됩니다.
+
+```bash
+python3 packaging/prepare_delivery.py --archive dist/MarketBrief-v1.8.0-Windows-x64.zip --keys keys --output delivery/MarketBrief-v1.8.0-Windows-x64-private.zip
+```
+
+## 소스에서 실행
 
 Python 3.10 이상을 사용합니다. 다음 파일에 키 한 줄을 넣습니다. 공식 RSS는 키가 필요 없습니다.
 

@@ -13,12 +13,14 @@ try:
     from .translation_quality import POLICY
     from .korean_links import KoreanArticleIndex
     from .article_summary import ArticleSummaryService
+    from .app_paths import DATA_ROOT, RESOURCE_ROOT
 except ImportError:
     from translation_quality import POLICY
     from korean_links import KoreanArticleIndex
     from article_summary import ArticleSummaryService
+    from app_paths import DATA_ROOT, RESOURCE_ROOT
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = RESOURCE_ROOT
 ASSETS = ("index.html", "styles.css", "js/config.js", "js/appearance.js", "js/market-ticker.js", "js/translation-quality.js", "js/market-impact.js", "js/article-links.js", "js/news-source.js", "js/news-context.js", "js/feed-health.js", "js/app.js")
 ASSETS += ("js/article-reader.js",)
 
@@ -149,11 +151,12 @@ class WidgetServer(ThreadingHTTPServer):
 
 
 def build_server(host: str, port: int, root: Path, feeds: dict[str, Path], runtime: dict,
-                 summary_options: list[str] | None = None) -> ThreadingHTTPServer:
+                 summary_options: list[str] | None = None, *, cache_root: Path | None = None) -> ThreadingHTTPServer:
     handler = partial(WidgetHandler, root=root, feeds=feeds, runtime={**runtime, "translationPolicy": POLICY})
     server = WidgetServer((host, port), handler)
-    server.korean_index = KoreanArticleIndex(root / 'data/.relay-cache/benzinga-korean-links.json')
-    server.article_summary = ArticleSummaryService(root / 'data/.relay-cache/article-summaries.ko.json', feeds, summary_options)
+    cache_root = cache_root or root
+    server.korean_index = KoreanArticleIndex(cache_root / 'data/.relay-cache/benzinga-korean-links.json')
+    server.article_summary = ArticleSummaryService(cache_root / 'data/.relay-cache/article-summaries.ko.json', feeds, summary_options)
     return server
 
 
@@ -179,14 +182,15 @@ def main() -> int:
                          ("news.official.json", args.official_out), ("news.benzinga.json", args.benzinga_out),
                          ("news.rss.json", args.rss_out)]:
         path = Path(value)
-        path = path if path.is_absolute() else PROJECT_ROOT / path
+        path = path if path.is_absolute() else DATA_ROOT / path
         if path.suffix != ".json":
             parser.error("피드 출력 경로는 .json 파일이어야 합니다")
         feeds["/data/" + route] = path.absolute()
     server = build_server(args.host, args.port, PROJECT_ROOT, feeds,
                           {"maxItems": max(1, args.limit), "tabsEnabled": not args.no_tabs},
                           ['--translate-provider', args.translate_provider, '--translate-source', args.translate_source,
-                           '--translate-terms-file', args.translate_terms_file, '--massive-key-file', args.massive_key_file])
+                           '--translate-terms-file', args.translate_terms_file, '--massive-key-file', args.massive_key_file],
+                          cache_root=DATA_ROOT)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

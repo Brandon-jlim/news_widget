@@ -13,7 +13,12 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from .app_paths import DATA_ROOT, child_command
+except ImportError:
+    from app_paths import DATA_ROOT, child_command
+
+PROJECT_ROOT = DATA_ROOT
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,8 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def build_relay_cmd(args: argparse.Namespace) -> list[str]:
     cmd = [
-        sys.executable,
-        str(PROJECT_ROOT / "tools" / "news_relay.py"),
+        *child_command('relay'),
         "--provider",
         args.provider,
         "--marketaux-mode",
@@ -190,8 +194,7 @@ def build_relay_cmd(args: argparse.Namespace) -> list[str]:
 
 def build_server_cmd(args: argparse.Namespace) -> list[str]:
     cmd = [
-        sys.executable,
-        str(PROJECT_ROOT / "tools" / "serve_overlay.py"),
+        *child_command('server'),
         "--host", args.host, "--port", str(args.port),
         "--out", args.out, "--reuters-out", args.reuters_out,
         "--marketaux-out", args.marketaux_out, "--limit", str(args.limit),
