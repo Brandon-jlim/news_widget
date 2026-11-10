@@ -63,6 +63,7 @@
     connectEvents();
     scheduleClockRefresh();
     updateWallClocks();
+    window.NewsArticleLinks.watch(() => { state.renderKey = null; render(); });
 
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
@@ -612,6 +613,25 @@
       publicationEl.textContent = publication.text;
       publicationEl.title = publication.detail;
       card.appendChild(publicationEl);
+      const benzingaLink = window.NewsArticleLinks.resolve(item);
+      if (benzingaLink) {
+        const links = document.createElement('div');
+        links.className = 'news-card__links';
+        const label = document.createElement('span');
+        label.textContent = benzingaLink.kind === 'korean' ? '한국어판 연결' : '원문 연결';
+        label.title = benzingaLink.kind === 'korean' ? `제목·발행 시각을 대조한 한국어 기사: ${benzingaLink.title}` : '대응 한국어 기사를 확인하지 못해 영문 원문을 엽니다.';
+        links.appendChild(label);
+        const alternative = benzingaLink.original || benzingaLink.search;
+        if (alternative) {
+          const link = document.createElement('a');
+          link.href = alternative;
+          link.textContent = benzingaLink.original ? '영문 원문 ↗' : '한국어판 검색 ↗';
+          link.target = runtimeConfig.linkTarget || '_blank';
+          link.rel = 'noopener noreferrer';
+          links.appendChild(link);
+        }
+        card.appendChild(links);
+      }
       newsListEl.appendChild(card);
     });
     if (state.heldItems) newsListEl.scrollTop = scrollPosition;
@@ -1018,6 +1038,8 @@
     }
 
     const linkConfig = runtimeConfig.articleLink || {};
+    const benzingaLink = window.NewsArticleLinks.resolve(item);
+    if (benzingaLink) return benzingaLink.url;
     const mode = String(linkConfig.mode || 'original').trim();
 
     if (mode === 'googleTranslate') {

@@ -17,16 +17,19 @@ const headline = { id: '1', title: 'Fed cuts rates', titleKo: '연준 금리 인
 const fresh = () => ({ updatedAt: new Date().toISOString(), items: [{...headline}], meta: {} });
 const impactExamples = JSON.parse(fs.readFileSync(path.join(root, 'tests/market_impact_examples.json'), 'utf8'));
 
-async function boot(payload, query = '', runtime = {}, EventSource = undefined, saved = {}) {
+async function boot(payload, query = '', runtime = {}, EventSource = undefined, saved = {}, koreanItems = []) {
   const nodes = new Map(), store = new Map(Object.entries(saved));
   let requestedUrl;
   const c = { console, URL, URLSearchParams, AbortController, Date, Intl };
   c.document = {getElementById(id) { if (!nodes.has(id)) nodes.set(id, new Element()); return nodes.get(id); }, createElement() { return new Element(); }, addEventListener() {} };
   c.window = { NEWS_WIDGET_RUNTIME: {translationPolicy:JSON.parse(fs.readFileSync(path.join(root,'translation-policy.json'),'utf8')), ...runtime}, location: { search: query }, localStorage: {getItem:k=>store.get(k)||null, setItem:(k,v)=>store.set(k,v)}, setTimeout:()=>1, clearTimeout(){}, open(){} };
   c.window.EventSource = EventSource;
-  c.fetch = async url => { requestedUrl = url; return {ok:true,json:async()=>payload}; };
+  c.fetch = async url => {
+    if (url === '/api/benzinga-korean') return {ok:true,json:async()=>({items:koreanItems,status:'ok'})};
+    requestedUrl = url; return {ok:true,json:async()=>payload};
+  };
   vm.createContext(c);
-  for (const filename of ['config.js', 'translation-quality.js', 'market-impact.js', 'news-source.js', 'news-context.js', 'feed-health.js', 'app.js']) {
+  for (const filename of ['config.js', 'translation-quality.js', 'market-impact.js', 'article-links.js', 'news-source.js', 'news-context.js', 'feed-health.js', 'app.js']) {
     let code = fs.readFileSync(path.join(root, 'js', filename), 'utf8');
     if (filename === 'app.js') code = code.replace(/\}\)\(\);\s*$/, 'window.audit = {state, runtimeConfig, refreshNews, switchFeedTab, togglePin};\n})();');
     vm.runInContext(code, c, {filename});
@@ -369,4 +372,46 @@ test('saved pins retain explained estimates but discard obsolete word-score labe
     const chips=b.nodes.get('news-list').querySelectorAll('.meta-chip--sentiment');
     assert.equal(chips.length,item.marketImpact?1:0);
   }
+});
+
+const benzingaStory = {
+  id:'benzinga:10000001',source:'Benzinga',title:'Jim Cramer Calls AMD a Winner After 13% Surge, Questions US Data Center Roadmap',
+  titleKo:'짐 크레이머, AMD 13% 급등 승자 꼽아…美 데이터센터 로드맵 의심',
+  publishedAt:'2026-11-10T05:50:00Z',entities:[{symbol:'AMD'}],
+  url:'https://www.benzinga.com/markets/tech/26/11/10000001/cramer-amd-roadmap',
+};
+const koreanStory = {title:'짐 크레이머, 주가 13% 급등에 AMD는 승자···미국 데이터센터 로드맵에는 의문',
+  url:'https://kr.benzinga.com/news/usa/stocks/test-korean-article/',publishedAt:'2026-11-10T06:59:00Z',symbols:['AMD']};
+
+test('Benzinga opens a matching Korean edition directly in widget and panel, retaining original access', async()=>{
+  for(const view of ['widget','panel']) {
+    const b=await boot({...fresh(),items:[benzingaStory]},`?view=${view}`,{},undefined,{},[koreanStory]);
+    const link=b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0];
+    assert.equal(link.href,koreanStory.url);
+    assert.equal(b.c.window.NewsArticleLinks.resolve(b.app.state.items[0]).original,benzingaStory.url);
+    assert.ok(b.nodes.get('news-list').querySelectorAll('.news-card__links').length);
+  }
+});
+
+test('unmatched, different-number, opposed, ambiguous and stale Korean candidates never redirect to a similar article',async()=>{
+  for(const candidates of [[],[{...koreanStory,title:koreanStory.title.replace('13%','30%')}],
+    [{...koreanStory,title:koreanStory.title.replace('급등','급락')}],
+    [{...koreanStory,symbols:['NVDA']}],[{...koreanStory,publishedAt:'2026-11-15T06:59:00Z'}],
+    [koreanStory,{...koreanStory,url:koreanStory.url+'duplicate/'}],
+    [{...koreanStory,url:'https://kr.benzinga.com.evil.test/news/usa/fake/'}]]) {
+    const b=await boot({...fresh(),items:[benzingaStory]},'',{},undefined,{},candidates);
+    const resolved=b.c.window.NewsArticleLinks.resolve(b.app.state.items[0]);
+    assert.equal(resolved.url,benzingaStory.url);
+    assert.equal(new URL(resolved.search).hostname,'kr.benzinga.com');
+    assert.ok(new URL(resolved.search).searchParams.get('s'));
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].href,benzingaStory.url);
+  }
+});
+
+test('existing Korean links bypass translation and old pinned Benzinga stories use current routing',async()=>{
+  const b=await boot({...fresh(),items:[{...benzingaStory,url:koreanStory.url}]});
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].href,koreanStory.url);
+  const saved={'news-overlay-widget.pins.v1.combined':JSON.stringify([{key:benzingaStory.id,pinnedAt:Date.now(),item:{...benzingaStory,originalTitle:benzingaStory.title,symbols:['AMD']}}])};
+  const pinned=await boot({...fresh(),items:[]},'',{},undefined,saved,[koreanStory]);
+  assert.equal(pinned.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].href,koreanStory.url);
 });

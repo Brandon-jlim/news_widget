@@ -148,6 +148,9 @@ button, a, input, [tabindex] { -webkit-tap-highlight-color: transparent; }
 .meta-chip--sentiment-negative { color: var(--negative-text); background: var(--negative-bg); }
 .meta-chip--sentiment-mixed { color: var(--mixed-text); background: var(--mixed-bg); }
 .news-card__impact { margin: 0; color: var(--text-sub); font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.news-card__links { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; color: var(--text-dim); font-size: 10px; line-height: 1.5; }
+.news-card__links a { color: var(--accent); text-decoration: none; padding: 2px 0; }
+.news-card__links a:hover { text-decoration: underline; }
 .news-card__title, .news-card__title-link { display: block; margin: 0; color: var(--text-main); font-size: var(--headline-size); font-weight: 600; line-height: 1.65; letter-spacing: -.025em; word-break: keep-all; overflow-wrap: anywhere; text-decoration: none; }
 .news-card__title-link:hover { color: var(--accent); }
 .news-card__actions { position: absolute; z-index: 1; top: 12px; right: 10px; display: flex; opacity: 0; transition: opacity .12s ease; }

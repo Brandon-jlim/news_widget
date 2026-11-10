@@ -11,11 +11,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 try:
     from .translation_quality import POLICY
+    from .korean_links import KoreanArticleIndex
 except ImportError:
     from translation_quality import POLICY
+    from korean_links import KoreanArticleIndex
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ("index.html", "styles.css", "js/config.js", "js/appearance.js", "js/translation-quality.js", "js/market-impact.js", "js/news-source.js", "js/news-context.js", "js/feed-health.js", "js/app.js")
+ASSETS = ("index.html", "styles.css", "js/config.js", "js/appearance.js", "js/translation-quality.js", "js/market-impact.js", "js/article-links.js", "js/news-source.js", "js/news-context.js", "js/feed-health.js", "js/app.js")
 
 
 class WidgetHandler(SimpleHTTPRequestHandler):
@@ -63,6 +65,14 @@ class WidgetHandler(SimpleHTTPRequestHandler):
 
     def send_head(self):
         route = unquote(urlsplit(self.path).path)
+        if route == '/api/benzinga-korean':
+            import io
+            body = json.dumps(self.server.korean_index.snapshot(), ensure_ascii=False).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            return io.BytesIO(body)
         if route == "/widget-runtime.js":
             import io
             body = ("window.NEWS_WIDGET_RUNTIME = " + json.dumps(self.runtime, ensure_ascii=False) + ";").encode("utf-8")
@@ -94,9 +104,18 @@ class WidgetHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
 
+class WidgetServer(ThreadingHTTPServer):
+    def server_close(self):
+        super().server_close()
+        if hasattr(self, 'korean_index'):
+            self.korean_index.close()
+
+
 def build_server(host: str, port: int, root: Path, feeds: dict[str, Path], runtime: dict) -> ThreadingHTTPServer:
     handler = partial(WidgetHandler, root=root, feeds=feeds, runtime={**runtime, "translationPolicy": POLICY})
-    return ThreadingHTTPServer((host, port), handler)
+    server = WidgetServer((host, port), handler)
+    server.korean_index = KoreanArticleIndex(root / 'data/.relay-cache/benzinga-korean-links.json')
+    return server
 
 
 def main() -> int:

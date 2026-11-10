@@ -14,6 +14,7 @@ window.NEWS_WIDGET_CONFIG = {
     // original | googleTranslate | deeplText
     // googleTranslate: 기사 URL을 Google Translate 웹사이트 번역으로 엽니다.
     // deeplText: 기사 URL이 아니라 제목/요약 텍스트를 DeepL 웹 번역기에 넘깁니다.
+    // Benzinga는 별도 처리: 한국어판 대응 기사 우선, 미확인 시 원문+한국어판 검색.
     mode: 'googleTranslate',
     sourceLang: 'en',
     targetLang: 'ko',
