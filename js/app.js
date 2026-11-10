@@ -26,6 +26,8 @@
     currentAbortController: null,
     timerId: null,
     clockTimerId: null,
+    events: null,
+    renderKey: null,
     activeTabKey: runtimeConfig.activeTabKey,
     editMode: pinningEnabled && Boolean(runtimeConfig.pinning?.startInEditMode),
     pinnedEntries: loadPinnedEntries(runtimeConfig.activeTabKey),
@@ -39,12 +41,26 @@
   function start() {
     render();
     refreshNews();
+    connectEvents();
     scheduleClockRefresh();
 
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         scheduleRefresh(500);
       }
+    });
+  }
+
+  function connectEvents() {
+    if (state.events) state.events.close();
+    state.events = null;
+    if (!window.EventSource || !runtimeConfig.eventsUrl) return;
+    const feed = String(getActiveSourceConfig().url || '').replace(/^\/?/, '/');
+    if (!/^\/data\/news\.(live|marketaux|reuters|official|rss|benzinga)\.json$/.test(feed)) return;
+    state.events = new window.EventSource(`${runtimeConfig.eventsUrl}?feed=${encodeURIComponent(feed)}`);
+    state.events.addEventListener('feed', () => {
+      // Coalesce bursts; the regular local JSON poll remains a fallback if SSE disconnects.
+      if (!state.requestInFlight) refreshNews();
     });
   }
 
@@ -139,6 +155,7 @@
 
     saveActiveTabKey(tab.key);
     source = createSourceForTab(tab.key);
+    connectEvents();
     titleEl.textContent = getActiveWidgetTitle();
     render();
     refreshNews();
@@ -182,7 +199,7 @@
 
       const rawItems = Array.isArray(payload.items) ? payload.items : [];
       state.items = dedupeLiveItems(rawItems);
-      state.feedUpdatedAt = payload.updatedAt || new Date().toISOString();
+      state.feedUpdatedAt = payload.updatedAt || null;
       state.feedMeta = payload.meta || {};
       state.lastSuccessAt = new Date().toISOString();
       state.lastError = '';
@@ -239,6 +256,10 @@
     updateTabs();
     updateToolbar();
 
+    const renderKey = JSON.stringify([displayItems, status.kind, state.editMode, Math.floor(Date.now() / 60_000)]);
+    if (renderKey === state.renderKey && displayItems.length > 0) return;
+    if (!state.loading || displayItems.length > 0) state.renderKey = renderKey;
+
     if (state.loading && displayItems.length === 0) {
       renderSkeletons();
       return;
@@ -276,6 +297,9 @@
       return { kind: 'error', label: '피드 오류' };
     }
 
+    const health = getFeedHealth();
+    if (health) return health;
+
     if (state.items.length === 0 && state.pinnedEntries.length > 0) {
       return { kind: 'warn', label: '핀 뉴스 유지' };
     }
@@ -285,6 +309,14 @@
     }
 
     return { kind: 'ok', label: '정상 연결' };
+  }
+
+  function getFeedHealth() {
+    return window.NewsFeedHealth.assess({
+      meta: state.feedMeta,
+      updatedAt: state.feedUpdatedAt,
+      items: state.items,
+    }, runtimeConfig);
   }
 
   function renderSkeletons() {
@@ -363,15 +395,19 @@
       }
 
       if (isStale) {
-        meta.appendChild(makeChip('재시도 중'));
+        meta.appendChild(makeChip('갱신 확인 필요'));
       }
+      if (item.translationStatus === 'failed') meta.appendChild(makeChip('원문'));
+      if (item.translationStatus === 'pending') meta.appendChild(makeChip('번역 중'));
+      if (item.official) meta.appendChild(makeChip('공식 발표'));
+      if (item.contentKind === 'press_release') meta.appendChild(makeChip('기업 보도자료'));
 
       const titleText = resolveDisplayTitle(item);
       let titleNode;
 
       if (hasUrl) {
         const linkEl = document.createElement('a');
-        linkEl.href = item.url;
+        linkEl.href = resolveArticleUrl(item);
         linkEl.className = 'news-card__title-link';
         linkEl.textContent = titleText;
         linkEl.target = runtimeConfig.linkTarget || '_blank';
@@ -536,6 +572,12 @@
 
     if (state.editMode) {
       return `${tabPrefix}편집 모드 · 카드 오른쪽 상단 핀 버튼으로 고정 · 핀 ${state.pinnedEntries.length}개`;
+    }
+
+    const health = getFeedHealth();
+    if (health) {
+      const lastUpdate = state.feedUpdatedAt ? formatAbsoluteDateLabel(new Date(state.feedUpdatedAt)) : '성공 기록 없음';
+      return `${tabPrefix}${health.label} · 마지막 수집 ${lastUpdate} · ${displayItems.length}개 표시`;
     }
 
     if (statusKind === 'warn' && state.items.length === 0 && state.pinnedEntries.length > 0) {
@@ -785,11 +827,16 @@
       id: String(base.id || '').trim(),
       title: String(base.title || '').trim(),
       titleKo: String(base.titleKo || '').trim(),
+      translationStatus: String(base.translationStatus || '').trim(),
+      official: Boolean(base.official),
+      contentKind: String(base.contentKind || '').trim(),
       publishedAt: String(base.publishedAt || '').trim(),
       publishedDate: String(base.publishedDate || '').trim(),
       source: String(base.source || '').trim(),
       category: String(base.category || '').trim(),
       sentiment: String(base.sentiment || '').trim(),
+      description: String(base.description || '').trim(),
+      snippet: String(base.snippet || '').trim(),
       url: String(base.url || '').trim(),
     };
   }
@@ -855,7 +902,65 @@
   }
 
   function hasArticleUrl(item) {
-    return /^https?:\/\//i.test(String(item?.url || '').trim());
+    return /^https?:\/\//i.test(getOriginalArticleUrl(item));
+  }
+
+  function getOriginalArticleUrl(item) {
+    return String(item?.url || '').trim();
+  }
+
+  function resolveArticleUrl(item) {
+    const originalUrl = getOriginalArticleUrl(item);
+    if (!/^https?:\/\//i.test(originalUrl)) {
+      return '';
+    }
+
+    const linkConfig = runtimeConfig.articleLink || {};
+    const mode = String(linkConfig.mode || 'original').trim();
+
+    if (mode === 'googleTranslate') {
+      return buildGoogleTranslateArticleUrl(originalUrl, linkConfig);
+    }
+
+    if (mode === 'deeplText') {
+      return buildDeepLTextUrl(item, linkConfig) || originalUrl;
+    }
+
+    return originalUrl;
+  }
+
+  function buildGoogleTranslateArticleUrl(originalUrl, linkConfig) {
+    const translateUrl = new URL('https://translate.google.com/translate');
+    translateUrl.searchParams.set('sl', String(linkConfig.sourceLang || 'en').toLowerCase());
+    translateUrl.searchParams.set('tl', String(linkConfig.targetLang || 'ko').toLowerCase());
+    translateUrl.searchParams.set('hl', String(linkConfig.uiLang || linkConfig.targetLang || 'ko').toLowerCase());
+    translateUrl.searchParams.set('u', originalUrl);
+    return translateUrl.toString();
+  }
+
+  function buildDeepLTextUrl(item, linkConfig) {
+    const maxChars = safeNumber(linkConfig.maxDeepLTextChars) || 3500;
+    const text = collectTextForTranslation(item, maxChars);
+    if (!text) {
+      return '';
+    }
+
+    const sourceLang = String(linkConfig.sourceLang || 'en').toLowerCase();
+    const targetLang = String(linkConfig.targetLang || 'ko').toLowerCase();
+    return `https://www.deepl.com/translator#${sourceLang}/${targetLang}/${encodeURIComponent(text)}`;
+  }
+
+  function collectTextForTranslation(item, maxChars) {
+    const originalUrl = getOriginalArticleUrl(item);
+    const pieces = [
+      item?.title,
+      item?.description || item?.snippet,
+      originalUrl ? `Original URL: ${originalUrl}` : '',
+    ]
+      .map((part) => String(part || '').trim())
+      .filter(Boolean);
+
+    return pieces.join('\n\n').slice(0, maxChars);
   }
 
   function openArticle(item) {
@@ -863,7 +968,10 @@
       return;
     }
 
-    const url = String(item.url).trim();
+    const url = resolveArticleUrl(item);
+    if (!url) {
+      return;
+    }
 
     if (runtimeConfig.linkTarget === '_self') {
       window.location.href = url;
@@ -890,6 +998,7 @@
   }
 
   function resolveRuntimeConfig(baseConfig) {
+    const serverConfig = window.NEWS_WIDGET_RUNTIME || {};
     const query = new URLSearchParams(window.location.search);
     const sourceType = query.get('source');
     const sourceUrl = query.get('url');
@@ -907,7 +1016,7 @@
     };
 
     const tabs = normalizeTabsConfig(baseConfig.tabs, sourceConfig, widgetTitle || baseConfig.widgetTitle);
-    if (tabsEnabledOverride === '0') {
+    if (tabsEnabledOverride === '0' || serverConfig.tabsEnabled === false || sourceUrl || sourceType) {
       tabs.enabled = false;
     }
     const requestedTabKey = normalizeKey(query.get('tab'));
@@ -917,7 +1026,7 @@
     return {
       ...baseConfig,
       widgetTitle: widgetTitle || baseConfig.widgetTitle,
-      maxItems: maxItems || baseConfig.maxItems,
+      maxItems: maxItems || serverConfig.maxItems || baseConfig.maxItems,
       refreshMs: refreshMs || baseConfig.refreshMs,
       activeTabKey,
       tabs,

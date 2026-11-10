@@ -1,283 +1,171 @@
-# 뉴스 오버레이 위젯 실행 가이드
+# 미국 증시 뉴스 위젯
 
-Marketaux API 뉴스와 Reuters 공개 XML 메타데이터(RSS/Atom/news sitemap)를 합쳐 뉴스 오버레이로 표시하는 프로젝트입니다. 기본 실행 시 통합/Reuters/Marketaux 탭용 JSON을 동시에 만들고, 위젯에서 탭으로 소스를 전환할 수 있습니다.
+현재 버전: **v1.0.0 — Benzinga 중심 구성**. 버전별 변경 사항은 [CHANGELOG.md](CHANGELOG.md)에 기록합니다.
 
-## 1. 키 파일 준비
-프로젝트 루트에 아래 파일을 만듭니다.
+방송 진행자가 별도 로컬 화면에서 미국 증시 관련 뉴스를 확인하는 위젯입니다. **Massive의 Benzinga News REST API**를 주력으로 사용하고 연준·BLS·BEA·SEC·EIA 공식 발표, CNBC·PR Newswire RSS를 함께 모읍니다. Marketaux와 Benzinga 직접 스트림도 선택적으로 지원합니다. 한국어 제목은 DeepL로 번역합니다. 현재 사용 범위는 시청자에게 송출하지 않는 진행자 전용 열람입니다.
+
+## 실행
+
+Python 3.10 이상을 사용합니다. 다음 파일에 키 한 줄을 넣습니다. 공식 RSS는 키가 필요 없습니다.
 
 ```text
-keys/marketaux_token.txt
+keys/massive_api_key.txt
 keys/deepl_api_key.txt
 ```
 
-각 파일에는 키 한 줄만 넣으면 됩니다.
-
-```text
-N32E...your_marketaux_token...
-```
-
-```text
-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx
-```
-
-Reuters 수집은 별도 API 키가 필요하지 않습니다. 기본값은 Reuters가 robots.txt에 공개한 news sitemap을 읽어 헤드라인, 발행 시각, URL 같은 메타데이터만 가져옵니다. 기사 본문은 크롤링하지 않습니다.
-
-## 2. DeepL 키 확인
 ```bash
-python3 tools/check_deepl.py
+./run_massive.sh
+# 같은 실행:
+python3 tools/run_overlay.py --no-marketaux --no-reuters-default-feed --limit 30
 ```
 
-## 3. 한 번에 실행
-```bash
-python3 tools/run_overlay.py --debug
-```
+브라우저에서 `http://127.0.0.1:8787/`를 엽니다. 편집·핀 고정: `http://127.0.0.1:8787/?edit=1`. 종료: Ctrl+C. 기본 제한은 5개이며 위 실행 예시는 진행자 열람용으로 30개를 표시합니다. OBS 브라우저 소스로도 동작하지만 현재 사용자가 요청한 용도는 별도 화면 열람입니다.
 
-또는
+`포트 8787가 이미 사용 중입니다`가 나오면 기존 위젯이 실행 중인지 위 주소를 먼저 열어 확인하세요. 실행기는 포트 충돌 시 추가 수집기를 시작하지 않습니다. 설정을 바꾸려면 기존 실행 터미널에서 Ctrl+C로 종료한 뒤 다시 실행합니다. `로컬 화면 발행: 1초`는 화면 데이터 취합 주기이며 Massive API 조회는 기본 10초 간격입니다.
 
-```bash
-./run_overlay.sh --debug
-```
+## 수집과 화면 반영
 
-기본 동작:
-- `combined` 모드: Marketaux broad 뉴스 + Reuters news sitemap 후보를 함께 수집
-- 미국 뉴스 기준
-- 45초마다 갱신
-- DeepL 한국어 번역
-- 시장 관련 키워드 점수로 1차 필터링한 뒤, 기본적으로 최신순(`--rank-mode fresh`)으로 최종 카드 선별
-- 정확한 시간이 없는 Reuters 날짜 전용(date-only) 항목은 같은 날짜의 정확한 시간 기사보다 뒤에 정렬
-- Combined 탭은 별도 소스 할당 없이 실제 발행 시각 기준 최신순으로 최종 카드 선별
-- 콘솔에 `sources candidates ... eligible ... final ... time exact=... date-only=...` 형태로 실제 소스별 후보/최종 개수를 출력
-- 통합 탭 `data/news.live.json`, Reuters 탭 `data/news.reuters.json`, Marketaux 탭 `data/news.marketaux.json` 동시 생성
-- 위젯 상단 탭에서 Combined / Reuters / Marketaux 전환 가능
-- http://127.0.0.1:8787/ 에 서버 실행
+| 단계 | 기본 동작 |
+|---|---|
+| Massive → Benzinga | 최신 200건을 기본 10초 간격 REST 조회. 인증은 Authorization 헤더 |
+| Marketaux | 목표 15초, 최대 50개 요청. 실제 응답의 일일·분당 한도로 자동 감속 |
+| 연준·BLS·BEA | 기본 60초, 공급자 TTL 우선. BEA 관측 TTL 17분 |
+| SEC·EIA | 기본 120~300초, 공식 보도자료/에너지 분석 |
+| PR Newswire | 금융·기술·기업·에너지 4개 RSS, 기본 120초 |
+| CNBC | 주요 뉴스·경제 2개 RSS. TTL 60분 준수, 보완 기사 용도 |
+| Reuters | 45초, 401/403 차단 시 최소 1시간 대기 |
+| Benzinga 직접 스트림 | Massive를 사용하지 않고 직접 발급 키가 있을 때 WebSocket 연결 |
+| 로컬 발행 | 1초 간격으로 소스별 완료 결과 취합 |
+| 번역 | 원문을 먼저 표시하고 새 제목을 건별 비동기 번역. 캐시 재사용 |
+| 브라우저 | SSE 변경 알림, 실패 시 5초 간격 로컬 JSON 조회 |
 
-## 4. 브라우저/OBS 확인
-브라우저:
-```text
-http://127.0.0.1:8787/
-```
+화면 갱신은 뉴스 API를 호출하지 않습니다. 느린 소스나 번역이 다른 소스의 수집을 막지 않습니다. 로컬 발행과 SSE 확인 주기 때문에 수신 후에도 약간의 지연은 있으며, 공급자 수집 지연과 OBS/유튜브 송출 지연은 별도입니다.
 
-편집 모드:
-```text
-http://127.0.0.1:8787/?edit=1
-```
+Marketaux 응답이 Standard의 `daily_limit=10000`이면 15초 목표를 사용합니다. 24시간 운영 시 정상 요청은 최대 약 5,760회입니다. 무료 한도 `100`이면 약 899초 이상으로 자동 감속합니다. 한도를 확인하지 못하면 무료 한도를 기준으로 동작합니다. 구독 변경은 다음 실제 API 응답부터 반영됩니다.
 
+요청 예약과 성공 결과는 `data/.relay-cache/`에 저장합니다. 이 상태 디렉토리와 API 키를 쓰는 수집기는 하나만 실행하세요. 다른 프로그램의 같은 키 사용량도 계정 한도에 포함됩니다. Marketaux 일일 한도 소진은 보수적으로 24시간 대기합니다. Massive의 401/403은 최소 1시간, 429는 최소 60초 대기하고 공급자의 `Retry-After`가 더 길면 우선합니다.
 
-## 5. 탭 사용
+## 뉴스 범위
 
-기본 실행만 해도 위젯 상단에 세 개의 탭이 표시됩니다.
+- 연준·금리·국채·CPI/PCE·고용·GDP·유가·관세·제재·전쟁·대만 등 거시/지정학 이슈
+- 대형 기술주, 반도체/AI, 실적·가이던스·인수합병·파산 관련 이슈
+- 해외 사건의 미국 증시 영향을 수집하도록 국가·언론사 제한은 기본 해제
+- 관련성 필터를 통과한 후보 중 실제 발행 시각 기준 최신순. 무관한 기사만 있으면 빈 목록 표시
 
-```text
-Combined  Reuters  Marketaux
-```
+키워드 기반 필터이므로 모든 시장 영향 사건의 감지나 중요도를 보장하지는 않습니다. 기존 호재/악재/중립 표시는 키워드 추정이며, 속보 여부나 실제 시장 반응의 검증을 뜻하지 않습니다. `js/config.js`의 `sentiment.enabled=false`로 끌 수 있습니다.
 
-각 탭은 아래 JSON 파일을 읽습니다.
+공식 발표 피드는 `tools/feed_sources.py`에 정의합니다.
 
-```text
-Combined  -> data/news.live.json
-Reuters   -> data/news.reuters.json
-Marketaux -> data/news.marketaux.json
-```
+| 피드 | 내용 |
+|---|---|
+| 연준 통화정책 | FOMC 성명·의사록 |
+| 연준 연설·증언 | 연준 인사 발언 자료 |
+| BLS CPI / 고용 / PPI / JOLTS | 소비자물가·비농업고용·실업률·생산자물가·구인/이직 발표별 RSS |
+| BEA | GDP·PCE 관련 개인소득/지출·무역 등 |
+| SEC | 규제 보도자료. 기업별 8-K/10-Q 공시 수집과는 별개 |
+| EIA | 보도자료·Today in Energy 분석. 주간 원유재고 초단위 피드 아님 |
 
-직접 특정 탭으로 열 수도 있습니다.
+BLS는 여러 시점의 수치를 섞은 요약 대신 발표별 RSS를 사용합니다. 발표 시각을 현재 시각으로 바꾸지 않습니다. 공식 발표 탭은 최근 7일, 통합 탭은 최근 48시간을 보여 줍니다. 조용한 기간에는 연결이 정상이어도 표시할 발표가 없을 수 있습니다. RSS 자체의 업데이트 지연은 조회 간격만 줄여 해결할 수 없습니다.
 
-```text
-http://127.0.0.1:8787/?tab=combined
-http://127.0.0.1:8787/?tab=reuters
-http://127.0.0.1:8787/?tab=marketaux
-```
+공개 피드는 총 16개(공식 10개, 기사·보도자료 6개)입니다. 조건부 요청과 피드 TTL을 적용하고 `--rss-interval`을 낮춰도 공급자 권장 간격보다 자주 요청하지 않습니다. `--no-public-rss`로 CNBC/PR Newswire를 끌 수 있습니다. 기업 보도자료에는 별도 배지를 표시하며, 상투적인 위험 고지에만 경제 키워드가 있는 홍보성 자료는 제목 기준으로 제외합니다.
 
-탭 상태는 브라우저 localStorage에 저장되므로 마지막으로 본 탭이 유지됩니다. 편집 모드 핀도 탭별로 분리 저장됩니다.
+## 탭과 옵션
 
-탭용 보조 JSON 생성을 끄고 기존처럼 단일 피드만 쓰려면 다음처럼 실행합니다.
+| 탭 | URL | JSON |
+|---|---|---|
+| 통합 | `?tab=combined` | `data/news.live.json` |
+| Benzinga | `?tab=benzinga` | `data/news.benzinga.json` |
+| 공식 발표 | `?tab=official` | `data/news.official.json` |
+| 기사·보도자료 | `?tab=rss` | `data/news.rss.json` |
+
+v1.0.0에서는 데이터가 없는 Reuters·Marketaux 탭을 제거했습니다. 이전에 해당 탭을 선택해 두었거나 이전 탭 URL로 접속하면 통합 탭이 열립니다. 필요할 때 단일 소스로 실행할 수 있도록 기존 수집 옵션은 유지합니다.
+
+키가 없는 Benzinga 탭은 `소스 연결 설정 필요`를 표시합니다. 탭 선택과 핀은 브라우저에 저장하고 핀은 탭별로 분리합니다. 기존 기사 링크의 Google Translate 웹 번역 기능도 유지합니다.
 
 ```bash
-python3 tools/run_overlay.py --no-tabs --debug
+# 현재 Reuters 체험 종료 상태에서 Marketaux + 공식 피드로 운영
+python3 tools/run_overlay.py --no-reuters-default-feed
+
+# 실제 관측된 API 한도가 설정값보다 우선
+python3 tools/run_overlay.py --marketaux-interval 15 --official-interval 60
+
+# 단일 소스 / 통합 탭만 표시 / 표시 개수
+python3 tools/run_overlay.py --provider marketaux
+python3 tools/run_overlay.py --no-tabs --limit 8
+
+# 공식 발표 보관 기간, 필터, 정렬
+python3 tools/run_overlay.py --official-lookback-hours 336
+python3 tools/run_overlay.py --min-overlay-score 3 --rank-mode balanced
+python3 tools/run_overlay.py --countries us --use-preferred-domains
+
+# 허가된 Reuters RSS/Atom/news sitemap 지정
+python3 tools/run_overlay.py --reuters-feed 'https://YOUR_PROVIDER/authorized-feed.xml'
+
+# 포트와 브라우저
+python3 tools/run_overlay.py --port 8888 --open-browser
 ```
 
-`news_relay.py`를 직접 실행할 때 탭용 JSON까지 만들려면 `--tab-feeds`를 붙입니다.
+`--watch`는 로컬 발행 주기입니다. 이를 60초로 늘리면 15초 수집 목표도 달성할 수 없으므로 기본 1초를 권장합니다. `--rank-mode fresh`는 최신순, `balanced`는 최신성과 점수, `score`는 점수순입니다. `--min-overlay-score 0`은 관련성 필터를 해제합니다. Reuters를 강제로 포함하려면 `--min-reuters-items 1`을 사용합니다.
+
+단일 실행은 다음과 같습니다. 지속적인 스트림과 비동기 번역은 watch 모드에서 동작합니다.
 
 ```bash
-python3 tools/news_relay.py \
-  --provider combined \
-  --tab-feeds \
-  --out data/news.live.json \
-  --reuters-out data/news.reuters.json \
-  --marketaux-out data/news.marketaux.json \
-  --translate-provider deepl \
-  --watch 45 \
-  --debug
+python3 tools/news_relay.py --provider combined --tab-feeds --translate-provider deepl
+python3 tools/serve_overlay.py --port 8787
 ```
 
-## 6. 개별 실행
-### Marketaux + Reuters 함께 수집
-```bash
-python3 tools/news_relay.py \
-  --provider combined \
-  --tab-feeds \
-  --marketaux-mode broad \
-  --countries us \
-  --lang en \
-  --fetch-limit 20 \
-  --reuters-fetch-limit 120 \
-  --reuters-sitemap-limit 3 \
-  --rank-mode fresh \
-  --limit 5 \
-  --use-preferred-domains \
-  --translate-provider deepl \
-  --translate-target ko \
-  --translate-source en \
-  --translate-cache data/translate_cache.ko.json \
-  --translate-terms-file tools/ko_terms.sample.json \
-  --out data/news.live.json \
-  --reuters-out data/news.reuters.json \
-  --marketaux-out data/news.marketaux.json \
-  --timeout 20 \
-  --request-retries 2 \
-  --retry-backoff 1.5 \
-  --watch 45 \
-  --debug
-```
+## Massive에서 구독한 Benzinga News 연결
 
-### Marketaux만 사용
-```bash
-python3 tools/run_overlay.py --provider marketaux --no-tabs --debug
-```
+Massive 대시보드 왼쪽 **Keys**의 API 키를 `keys/massive_api_key.txt`에 한 줄로 저장합니다. `MASSIVE_API_KEY` 환경변수나 `--massive-key-file /path/to/key.txt`도 지원합니다. 명시한 파일이 있으면 환경변수보다 우선합니다. 키는 서버에서만 읽고 요청 URL·브라우저 설정·뉴스 JSON에 넣지 않습니다.
 
-### Reuters만 사용
-```bash
-python3 tools/run_overlay.py --provider reuters --no-tabs --debug
-```
-
-### Reuters RSS/Atom/sitemap 직접 지정
-기본 Reuters news sitemap 대신 직접 관리하는 RSS/Atom/sitemap URL 또는 로컬 XML 파일을 지정할 수 있습니다.
+`./run_massive.sh`를 실행하면 Marketaux와 만료된 Reuters를 제외한 통합 위젯이 실행됩니다. Massive 키를 자동으로 감지하여 **Benzinga 탭**과 **통합 탭**에 표시합니다. 이 REST 연결에는 WebSocket 패키지 설치가 필요 없습니다. Massive 키와 Benzinga 직접 키가 모두 있으면 Massive를 우선합니다.
 
 ```bash
-python3 tools/run_overlay.py \
-  --provider combined \
-  --reuters-feed "https://example.com/reuters-or-licensed-feed.xml" \
-  --no-reuters-default-feed \
-  --debug
+# 기본 10초에서 15초로 조정
+./run_massive.sh --massive-interval 15
+
+# Massive 뉴스만 표시
+python3 tools/run_overlay.py --provider massive --limit 30
 ```
 
-여러 피드를 합치려면 `--reuters-feed`를 여러 번 넣습니다.
+최근 48시간 범위에서 최신 200건을 다시 조회하여 원래 발행 시각과 수정 시각을 구분합니다. `--massive-fetch-limit`으로 1~1000건 범위를 설정할 수 있습니다. 재시작 시에도 최근 기사를 복구하지만, 장시간 중단이나 많은 뉴스 발생으로 이 범위를 벗어난 기사까지 모두 보충하는 전체 아카이브 수집은 아닙니다. API 최신 목록에서 삭제되거나 범위를 벗어난 기사는 다음 정상 결과에 반영됩니다. 새 제목은 원문을 먼저 표시하고 한국어 번역이 끝나는 대로 교체합니다.
+
+2026-11-10 실제 사용자 구독 키로 HTTP 200/OK, 기사 수신과 한국어 번역을 확인했습니다. 공식 [News v2 문서](https://massive.com/docs/rest/partners/benzinga/news), [헤더 인증 안내](https://massive.com/docs/rest/quickstart)를 따릅니다.
+
+## Benzinga 직접 발급 키로 연결하는 경우
+
+실시간 뉴스 스트림 권한이 있는 API 키를 준비하고 선택 의존성을 설치합니다.
 
 ```bash
-python3 tools/run_overlay.py \
-  --provider combined \
-  --reuters-feed "https://example.com/feed-1.xml" \
-  --reuters-feed "https://example.com/feed-2.xml"
+python3 -m pip install -r requirements-stream.txt
 ```
 
-### 서버만
-```bash
-python3 -m http.server 8787 --bind 127.0.0.1 --directory .
-```
+`keys/benzinga_token.txt`에 키를 저장하고 위젯을 재시작합니다. `BENZINGA_API_KEY` 환경변수 또는 `--benzinga-key-file /path/to/token.txt`도 지원합니다. `--no-benzinga`로 끌 수 있습니다. 키를 브라우저 설정이나 URL에 넣지 마세요.
 
-## 7. 자주 쓰는 옵션
-포트 변경:
-```bash
-python3 tools/run_overlay.py --port 8888
-```
+이 직접 스트림 연결은 새 기사/수정/삭제 이벤트를 처리합니다. 기사 ID로 중복을 제거하고 원래 발행 시각을 유지합니다. heartbeat와 재연결 대기를 구현했습니다. 직접 스트림에는 시작 전/중단 동안의 REST 보충 수집이 없습니다. 직접 발급 키가 없어 스트림 연결은 검증하지 못했으며, 이벤트 파싱·수정·삭제는 모의 데이터로 검증했습니다. 위 Massive REST 연결과는 별개입니다.
 
-브라우저 자동 열기:
-```bash
-python3 tools/run_overlay.py --open-browser
-```
+현재는 진행자 전용 열람이므로 방송 재배포 계약을 전제로 하지 않습니다. 일반 웹 서비스 구독과 API/자동 수집 권한은 구분합니다. 향후 위젯 화면을 공개 송출한다면 그 이용 범위는 별도 확인해야 합니다. [뉴스 소스 비교와 세이브티커 조사](NEWS_SOURCES.md)를 참고하세요.
 
-도메인 필터 끄기:
-```bash
-python3 tools/run_overlay.py --no-use-preferred-domains
-```
+2026-11-10 사용자 확인 기준 Reuters는 체험 종료로 현재 사용 불가입니다. 위의 `--no-reuters-default-feed` 실행 옵션으로 제외할 수 있습니다. Marketaux는 무료 한도가 관측된 상태입니다.
 
-갱신 주기 변경:
-```bash
-python3 tools/run_overlay.py --watch 60
-```
+## 상태와 파일 보호
 
-Reuters 후보 개수 늘리기:
-```bash
-python3 tools/run_overlay.py --reuters-fetch-limit 200 --reuters-sitemap-limit 5
-```
+- 소스 실패 시 마지막 성공 데이터와 원래 시각을 보존하고 실패 상태 표시
+- `번역 중`: 원문 우선 표시. 실패 시 `원문`과 번역 오류 상태 표시
+- `뉴스 갱신 지연`: 수집기 heartbeat 정지. `최신 기사 지연`: 기사 자체가 오래됨
+- 공식 발표 탭은 발표가 드문 특성을 반영해 설정된 보관 기간을 오래됨 기준으로 사용
+- 피드·상태·번역 캐시는 임시 파일 작성 후 원자적으로 교체
+- 전용 서버는 위젯 자산, 지정한 여섯 JSON, 그 JSON의 SSE 알림만 제공. 키·환경 파일·캐시·코드·디렉토리 목록은 비공개
 
-Reuters 언어 필터:
-```bash
-python3 tools/run_overlay.py --reuters-lang en
-```
+`--out`, `--marketaux-out`, `--reuters-out`, `--official-out`, `--rss-out`, `--benzinga-out`으로 저장 위치를 바꿔도 로컬 제공 URL은 유지됩니다. `?url=...` 또는 `?source=...`는 탭을 끄고 지정 소스를 사용합니다. 임의 로컬 파일은 제공되지 않으므로 커스텀 JSON은 `--out`으로 연결하세요.
 
-기본값은 `--lang` 값입니다. Reuters sitemap에 `news:language`가 있으면 해당 언어만 통과시키고, 언어 메타데이터가 비어 있는 RSS/Atom 항목은 안전하게 유지합니다.
+## 검증
 
-시장 관련 점수 필터 완화:
-```bash
-python3 tools/run_overlay.py --min-overlay-score 3
-```
-
-Reuters 일반 뉴스까지 더 많이 보고 싶으면 점수를 0에 가깝게 낮추고, 증시·매크로 중심으로 더 엄격하게 보려면 8 이상으로 높입니다.
-
-최종 카드 선정 방식 변경:
-```bash
-python3 tools/run_overlay.py --rank-mode fresh
-python3 tools/run_overlay.py --rank-mode balanced
-python3 tools/run_overlay.py --rank-mode score
-```
-
-- `fresh`: 기본값입니다. 점수 필터를 통과한 후보 중 최신순으로 5개를 고릅니다. Reuters URL 날짜만 있는 날짜 전용(date-only) 항목은 해당 UTC 날짜의 00:00 기준으로 보수적으로 정렬되어, 같은 날짜의 정확한 시각 기사보다 뒤에 놓입니다.
-- `balanced`: 최신성을 강하게 반영하되 점수가 높은 중요 뉴스도 일부 살립니다.
-- `score`: v3와 같은 방식입니다. 점수 높은 뉴스가 오래된 뉴스여도 최종 5개에 남을 수 있습니다.
-
-Marketaux broad 검색은 기본적으로 최신 뉴스 우선을 위해 `sort=published_on`을 요청합니다. API가 해당 sort 값을 거부하면 `published_at`, `relevance_score` 순서로 자동 fallback합니다.
-
-Reuters sitemap 중 일부는 정확한 시각 없이 날짜만 제공할 수 있습니다. 이 항목은 `5.12`처럼 날짜만 표시되고, Combined 탭의 최신순 알고리즘에서는 해당 날짜의 00:00 UTC로 보수적으로 정렬합니다. 따라서 `35분 전`처럼 정확한 시간이 있는 Marketaux 뉴스가 날짜만 있는 Reuters 뉴스보다 먼저 올라옵니다.
-
-Combined 탭은 기본적으로 `--min-reuters-items 0`입니다. 즉, Reuters를 강제로 끼워 넣지 않고 Marketaux와 Reuters의 eligible 후보를 발행 시각 기준으로 비교합니다. `eligible` 후보는 각 provider 탭에서 쓰는 필터/폴백을 먼저 적용한 결과라서, Marketaux 탭에 보이는 최신 기사가 combined 단계에서 다른 provider의 고점수 기사 때문에 통째로 사라지는 현상을 막습니다. Reuters를 반드시 섞고 싶은 경우에만 값을 올립니다.
+외부 API 없는 회귀 테스트입니다. Node.js 18 이상과 localhost 임시 포트가 필요합니다.
 
 ```bash
-python3 tools/run_overlay.py --min-reuters-items 1
-python3 tools/run_overlay.py --min-reuters-items 2
+python3 -m unittest discover -s tests -v
+node tests/frontend.test.cjs
 ```
 
-실제 Reuters 수집 여부를 바로 확인하려면 콘솔의 아래 줄을 보면 됩니다.
-
-```text
-[news_relay] sources candidates marketaux=20 reuters=120; eligible marketaux=20 reuters=84; combined final marketaux=2 reuters=3; time exact=5 date-only=0 missing=0
-```
-
-`candidates reuters=0`이면 Reuters XML을 못 가져왔거나, Reuters 쪽에 유효한 제목 후보가 없는 상태입니다. 이때는 `--debug`로 실행하면 Reuters XML 요청 URL, 파싱 오류, source error가 출력됩니다.
-
-Reuters 시간 정보 확인:
-```bash
-python3 tools/run_overlay.py --debug --min-overlay-score 3
-```
-
-정상이라면 debug 로그에 아래처럼 Reuters 날짜 소스별 개수가 출력됩니다.
-
-```text
-[news_relay][debug] reuters date_sources= {"news_publication_date": 118, "lastmod_fallback": 2, "url_date_fallback": 0, "missing_date_allowed": 0, "missing_date_skipped": 0}
-```
-
-- `news_publication_date`: Reuters news sitemap의 `news:publication_date`를 사용
-- `lastmod_fallback`: `news:publication_date`가 비어 있어 sitemap의 top-level `lastmod`를 대신 사용
-- `url_date_fallback`: 정확한 시간이 없고 URL의 `YYYY-MM-DD` 날짜만 확인되어 날짜만 표시
-- `missing_date_skipped`: 날짜 정보를 전혀 확인할 수 없어 기본 설정에서 제외
-
-날짜가 전혀 없는 Reuters 항목까지 강제로 보고 싶을 때만 아래 옵션을 사용합니다. 이 경우 해당 항목은 다시 `시간 미상`으로 표시될 수 있습니다.
-
-```bash
-python3 tools/run_overlay.py --allow-undated-reuters
-```
-
-## 8. Reuters 수집 방식 참고
-- 기본 Reuters provider는 `DEFAULT_REUTERS_SOURCES`에 등록된 Reuters news sitemap index와 direct news sitemap fallback을 읽습니다.
-- sitemap index면 최신 하위 sitemap 일부를 가져오고, news sitemap이면 `news:title`, `news:publication_date`, `lastmod`, `loc`를 사용합니다.
-- `news:publication_date`가 없으면 top-level `lastmod`를 발행/갱신 시각으로 대신 사용합니다. `lastmod`도 없고 URL에 `YYYY-MM-DD` 날짜가 있으면 카드에는 시간 없이 날짜만 표시합니다. 이 날짜 전용(date-only) 항목은 최신순 정렬에서 같은 날짜의 정확한 시간 기사보다 뒤로 밀립니다.
-- 날짜 정보를 전혀 확인할 수 없는 Reuters 항목은 기본적으로 제외합니다.
-- RSS/Atom이면 `title`, `link`, `pubDate/updated`, `description/summary`를 사용합니다.
-- 기사 본문 HTML 페이지는 요청하지 않습니다.
-- 상업적 서비스나 재배포 용도라면 Reuters 라이선스와 약관을 별도로 확인해야 합니다.
-
-## 추가 기능: 호재/악재/중립 표시
-
-- 각 카드 메타의 맨 앞에 `호재 / 악재 / 중립` 칩이 표시됩니다.
-- 기본 색상은 `호재=초록`, `악재=빨강`, `중립=회색`입니다.
-- 위젯은 `item.sentiment` 값을 우선 사용하고, 값이 없으면 제목 키워드로 간단히 추정합니다.
-- relay 스크립트는 Marketaux와 Reuters 기사 정규화 시 `sentiment` 필드를 함께 저장합니다.
+API 한도 변경, 재시작·오류 대기, RSS 조건부 요청, 공식 발표 시각/보관 구간, 독립 수집, 번역 캐시, 스트림 수정/삭제, SSE 경로 보호, 탭 전환과 원문→번역 반영을 검증합니다. 화면 테스트는 DOM 모의 환경이며 실제 OBS 레이아웃 검증은 별도입니다.

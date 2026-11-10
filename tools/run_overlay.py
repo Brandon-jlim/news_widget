@@ -2,32 +2,43 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import os
-import signal
+import socket
 import subprocess
 import sys
 import time
 import webbrowser
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="뉴스 수집(news_relay)과 로컬 웹서버(http.server)를 한 번에 실행합니다."
+        description="뉴스 수집과 공개 파일만 제공하는 위젯 서버를 실행합니다."
     )
     parser.add_argument("--host", default="127.0.0.1", help="로컬 서버 바인드 주소")
     parser.add_argument("--port", type=int, default=8787, help="로컬 서버 포트")
-    parser.add_argument("--watch", type=int, default=45, help="뉴스 갱신 주기(초)")
+    parser.add_argument("--watch", type=int, default=1, help="로컬 수집 상태/화면 발행 주기(초), API 호출 주기와 별개")
+    parser.add_argument("--marketaux-interval", type=int, default=15, help="Marketaux 목표 요청 간격(초). 실제 응답 한도가 우선합니다")
+    parser.add_argument("--no-marketaux", action="store_true")
+    parser.add_argument("--massive-key-file", default="")
+    parser.add_argument("--massive-interval", type=int, default=10)
+    parser.add_argument("--massive-fetch-limit", type=int, default=200)
+    parser.add_argument("--no-massive", action="store_true")
+    parser.add_argument("--reuters-interval", type=int, default=45, help="Reuters 최소 요청 간격(초)")
+    parser.add_argument("--state-dir", default="data/.relay-cache", help="재시작 시에도 유지할 소스별 요청 상태")
     parser.add_argument("--limit", type=int, default=5, help="최종 카드 수")
-    parser.add_argument("--fetch-limit", type=int, default=20, help="marketaux에서 가져올 원시 기사 수")
+    parser.add_argument("--fetch-limit", type=int, default=50, help="marketaux에서 가져올 원시 기사 수")
     parser.add_argument("--timeout", type=float, default=20.0, help="API 요청 타임아웃(초)")
     parser.add_argument("--request-retries", type=int, default=2, help="실패 시 재시도 횟수")
     parser.add_argument("--retry-backoff", type=float, default=1.5, help="재시도 대기 배수")
-    parser.add_argument("--provider", choices=["marketaux", "reuters", "combined"], default="combined")
+    parser.add_argument("--provider", choices=["marketaux", "reuters", "massive", "combined"], default="combined")
     parser.add_argument("--marketaux-mode", choices=["broad", "indices", "watchlist"], default="broad")
-    parser.add_argument("--countries", default="us")
+    parser.add_argument("--countries", default="")
     parser.add_argument("--lang", default="en")
     parser.add_argument("--published-after", default="")
     parser.add_argument("--query", default="")
@@ -48,16 +59,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--translate-cache", default="data/translate_cache.ko.json")
     parser.add_argument("--translate-terms-file", default="tools/ko_terms.sample.json")
     parser.add_argument("--out", default="data/news.live.json", help="통합 탭/기본 JSON 출력 경로")
-    parser.add_argument("--tabs", action="store_true", default=True, help="통합/Reuters/Marketaux 탭용 JSON을 함께 생성합니다")
+    parser.add_argument("--tabs", action="store_true", default=True, help="통합/Benzinga/공식 발표/기사·보도자료 등 탭용 JSON을 함께 생성합니다")
     parser.add_argument("--no-tabs", action="store_false", dest="tabs", help="탭용 보조 JSON 생성을 끕니다")
     parser.add_argument("--reuters-out", default="data/news.reuters.json", help="Reuters 탭 JSON 출력 경로")
     parser.add_argument("--marketaux-out", default="data/news.marketaux.json", help="Marketaux 탭 JSON 출력 경로")
     parser.add_argument("--min-overlay-score", type=float, default=6.5)
-    parser.add_argument("--use-preferred-domains", action="store_true", default=True)
+    parser.add_argument("--use-preferred-domains", action="store_true", default=False)
     parser.add_argument("--no-use-preferred-domains", action="store_false", dest="use_preferred_domains")
     parser.add_argument("--must-have-entities", action="store_true", default=False)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--open-browser", action="store_true", help="서버가 뜨면 기본 브라우저로 URL 열기")
+    parser.add_argument("--official-out", default="data/news.official.json")
+    parser.add_argument("--rss-out", default="data/news.rss.json")
+    parser.add_argument("--rss-interval", type=int, default=120)
+    parser.add_argument("--no-public-rss", action="store_true")
+    parser.add_argument("--benzinga-out", default="data/news.benzinga.json")
+    parser.add_argument("--official-interval", type=int, default=60)
+    parser.add_argument("--official-lookback-hours", type=int, default=168)
+    parser.add_argument("--no-official-feeds", action="store_true")
+    parser.add_argument("--no-benzinga", action="store_true")
+    parser.add_argument("--benzinga-key-file", default="")
     return parser
 
 
@@ -101,6 +122,19 @@ def build_relay_cmd(args: argparse.Namespace) -> list[str]:
         str(args.retry_backoff),
         "--watch",
         str(args.watch),
+        "--marketaux-interval", str(args.marketaux_interval),
+        "--massive-key-file", args.massive_key_file,
+        "--massive-interval", str(args.massive_interval),
+        "--massive-fetch-limit", str(args.massive_fetch_limit),
+        "--reuters-interval", str(args.reuters_interval),
+        "--state-dir", args.state_dir,
+        "--official-out", args.official_out,
+        "--rss-out", args.rss_out,
+        "--rss-interval", str(args.rss_interval),
+        "--benzinga-out", args.benzinga_out,
+        "--official-interval", str(args.official_interval),
+        "--official-lookback-hours", str(args.official_lookback_hours),
+        "--benzinga-key-file", args.benzinga_key_file,
         "--min-overlay-score",
         str(args.min_overlay_score),
         "--rank-mode",
@@ -121,6 +155,16 @@ def build_relay_cmd(args: argparse.Namespace) -> list[str]:
 
     for feed in args.reuters_feed:
         cmd.extend(["--reuters-feed", feed])
+    if args.no_official_feeds:
+        cmd.append("--no-official-feeds")
+    if args.no_public_rss:
+        cmd.append("--no-public-rss")
+    if args.no_marketaux:
+        cmd.append("--no-marketaux")
+    if args.no_massive:
+        cmd.append("--no-massive")
+    if args.no_benzinga:
+        cmd.append("--no-benzinga")
     if args.no_reuters_default_feed:
         cmd.append("--no-reuters-default-feed")
     if args.allow_undated_reuters:
@@ -145,23 +189,30 @@ def build_relay_cmd(args: argparse.Namespace) -> list[str]:
 
 
 def build_server_cmd(args: argparse.Namespace) -> list[str]:
-    return [
+    cmd = [
         sys.executable,
-        "-m",
-        "http.server",
-        str(args.port),
-        "--bind",
-        args.host,
-        "--directory",
-        str(PROJECT_ROOT),
+        str(PROJECT_ROOT / "tools" / "serve_overlay.py"),
+        "--host", args.host, "--port", str(args.port),
+        "--out", args.out, "--reuters-out", args.reuters_out,
+        "--marketaux-out", args.marketaux_out, "--limit", str(args.limit),
+        "--official-out", args.official_out, "--benzinga-out", args.benzinga_out,
+        "--rss-out", args.rss_out,
     ]
+    if not args.tabs or args.provider != "combined":
+        cmd.append("--no-tabs")
+    return cmd
 
 
-def terminate_process(proc: subprocess.Popen[bytes] | None, *, sig: int = signal.SIGTERM) -> None:
+def terminate_process(proc: subprocess.Popen[bytes] | None) -> None:
     if proc is None or proc.poll() is not None:
         return
     try:
-        proc.send_signal(sig)
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=3)
     except ProcessLookupError:
         return
 
@@ -184,14 +235,50 @@ def wait_for_exit(relay_proc: subprocess.Popen[bytes], server_proc: subprocess.P
         print("\n[run_overlay] stopping...")
         terminate_process(relay_proc)
         terminate_process(server_proc)
-        time.sleep(0.5)
-        terminate_process(relay_proc, sig=signal.SIGKILL)
-        terminate_process(server_proc, sig=signal.SIGKILL)
         return 0
+
+
+def check_server_port(host: str, port: int) -> bool:
+    """Reject duplicate launches before they can start another paid API collector."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((host, port))
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE:
+                raise
+            print(f"[run_overlay] 포트 {port}가 이미 사용 중입니다. 추가 수집기는 시작하지 않았습니다.")
+            print(f"[run_overlay] 기존 위젯 확인: http://{host}:{port}/?tab=benzinga")
+            print("[run_overlay] 설정을 바꾸려면 기존 실행 터미널에서 Ctrl+C로 종료한 뒤 다시 실행하세요.")
+            return False
+    return True
+
+
+def wait_for_server(server_proc: subprocess.Popen[bytes], host: str, port: int) -> bool:
+    """Start collection only after the HTTP server is ready."""
+    connect_host = "127.0.0.1" if host == "0.0.0.0" else host
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if server_proc.poll() is not None:
+            return False
+        try:
+            with urlopen(f"http://{connect_host}:{port}/widget-runtime.js", timeout=0.5) as response:
+                if response.status == 200 and server_proc.poll() is None:
+                    return True
+        except (OSError, URLError):
+            pass
+        time.sleep(0.1)
+    return False
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.provider != "combined":
+        args.tabs = False
+    if args.watch <= 0 or args.limit <= 0:
+        raise SystemExit("--watch 와 --limit 은 양수여야 합니다. 1회 수집은 news_relay.py를 사용하세요.")
+    if not check_server_port(args.host, args.port):
+        return 1
     relay_cmd = build_relay_cmd(args)
     server_cmd = build_server_cmd(args)
 
@@ -203,10 +290,19 @@ def main() -> int:
         print("[run_overlay][debug] relay_cmd=", " ".join(relay_cmd))
         print("[run_overlay][debug] server_cmd=", " ".join(server_cmd))
 
-    relay_proc = subprocess.Popen(relay_cmd, cwd=PROJECT_ROOT, env=env)
-    # relay가 첫 fetch를 시작할 시간을 아주 조금 준다.
-    time.sleep(0.6)
-    server_proc = subprocess.Popen(server_cmd, cwd=PROJECT_ROOT, env=env)
+    relay_proc = None
+    server_proc = None
+    try:
+        server_proc = subprocess.Popen(server_cmd, cwd=PROJECT_ROOT, env=env)
+        if not wait_for_server(server_proc, args.host, args.port):
+            print("[run_overlay] 위젯 서버를 시작하지 못했습니다. 수집기는 시작하지 않았습니다.")
+            terminate_process(server_proc)
+            return 1
+        relay_proc = subprocess.Popen(relay_cmd, cwd=PROJECT_ROOT, env=env)
+    except BaseException:
+        terminate_process(relay_proc)
+        terminate_process(server_proc)
+        raise
 
     base_url = f"http://{args.host}:{args.port}/"
     overlay_url = base_url if args.tabs else f"{base_url}?tabs=0"
@@ -214,9 +310,11 @@ def main() -> int:
     print(f"[run_overlay] overlay url: {overlay_url}")
     print(f"[run_overlay] edit mode url: {edit_url}")
     if args.tabs and args.provider == "combined":
-        print(f"[run_overlay] tabs: combined={args.out} reuters={args.reuters_out} marketaux={args.marketaux_out}")
-        print(f"[run_overlay] tab urls: {base_url}?tab=combined | {base_url}?tab=reuters | {base_url}?tab=marketaux")
-    print(f"[run_overlay] relay refresh: every {args.watch}s")
+        tabs = [("combined", args.out), ("benzinga", args.benzinga_out),
+                ("official", args.official_out), ("rss", args.rss_out)]
+        print("[run_overlay] tabs: " + " ".join(f"{key}={path}" for key, path in tabs))
+        print("[run_overlay] tab urls: " + " | ".join(f"{base_url}?tab={key}" for key, _ in tabs))
+    print(f"[run_overlay] 로컬 화면 발행: {args.watch}초 간격 (뉴스 API 호출 간격과 별개)")
     print("[run_overlay] stop: Ctrl+C")
 
     if args.open_browser:

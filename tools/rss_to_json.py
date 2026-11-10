@@ -14,6 +14,10 @@ from typing import Iterable
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
+try:
+    from .storage import atomic_write_json
+except ImportError:
+    from storage import atomic_write_json
 
 USER_AGENT = "NewsOverlayWidget/0.1"
 HTTP_PATTERN = re.compile(r"^https?://", re.IGNORECASE)
@@ -171,8 +175,8 @@ def parse_feed(xml_bytes: bytes, source: str) -> list[dict]:
 def sort_key(item: dict) -> tuple[int, str]:
     published_at = item.get("publishedAt")
     if not published_at:
-        return (1, "")
-    return (0, published_at)
+        return (0, "")
+    return (1, published_at)
 
 
 def write_payload(items: list[dict], out_path: Path) -> None:
@@ -180,8 +184,7 @@ def write_payload(items: list[dict], out_path: Path) -> None:
         "updatedAt": now_iso(),
         "items": items,
     }
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(out_path, payload)
 
 
 def refresh_once(rss_list: list[str], out_path: Path, limit: int, timeout: float) -> None:
@@ -196,6 +199,8 @@ def refresh_once(rss_list: list[str], out_path: Path, limit: int, timeout: float
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{source}: {exc}")
 
+    if errors and len(errors) == len(rss_list):
+        raise RuntimeError("모든 피드 갱신에 실패했습니다. 기존 파일을 유지합니다.")
     combined.sort(key=sort_key)
     combined.reverse()
     limited_items = combined[:limit]

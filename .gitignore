@@ -1,5 +1,5 @@
-
 # Local env / secrets
+.env
 .env.local
 keys/
 
@@ -8,33 +8,11 @@ __pycache__/
 *.py[cod]
 
 # Generated runtime data/cache
+data/.relay-cache/
 data/news.live.json
+data/news.marketaux.json
+data/news.reuters.json
+data/news.official.json
+data/news.rss.json
+data/news.benzinga.json
 data/translate_cache*.json
-
-# Python cache
-__pycache__/
-*.py[cod]
-
-# Local env / secrets
-.env
-.env.local
-keys/
-
-# Generated news data
-data/news.live.json
-data/news.marketaux.json
-data/news.reuters.json
-
-# Python cache
-__pycache__/
-*.py[cod]
-
-# Local env / secrets
-.env
-.env.local
-keys/
-
-# Generated news data
-data/news.live.json
-data/news.marketaux.json
-data/news.reuters.json

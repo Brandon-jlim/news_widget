@@ -72,11 +72,17 @@
       id: normalizeText(rawItem.id || rawItem.uuid || rawItem.guid || rawItem.url || rawItem.link || `${title}-${publishedDate?.toISOString?.() ?? publishedDateOnly}`),
       title: titleKo || title || '제목 없음',
       titleKo: titleKo || '',
+      translationStatus: normalizeText(rawItem.translationStatus || ''),
+      official: Boolean(rawItem.official),
+      contentKind: normalizeText(rawItem.contentKind || ''),
+      firstSeenAt: normalizeText(rawItem.firstSeenAt || ''),
       publishedAt: publishedDate ? publishedDate.toISOString() : null,
       publishedDate: publishedDateOnly || '',
       source: normalizeText(rawItem.source || rawItem.provider || rawItem.feedTitle || fallbackSourceLabel || 'Feed'),
       category: normalizeText(rawItem.category || rawItem.section || rawItem.topic || ''),
       sentiment: normalizeText(rawItem.sentiment || rawItem.tone || rawItem.status || rawItem.impact || '').toLowerCase(),
+      description: normalizeText(rawItem.description || rawItem.summary || rawItem.excerpt || ''),
+      snippet: normalizeText(rawItem.snippet || rawItem.description || rawItem.summary || rawItem.excerpt || ''),
       url: normalizeText(rawItem.url || rawItem.link || rawItem.storyUrl || ''),
     };
   }
@@ -95,10 +101,10 @@
       .map((item) => normalizeNewsItem(item, fallbackSourceLabel))
       .filter((item) => item.title && item.title !== '제목 없음');
 
-    const updatedDate = parseDate(base.updatedAt || base.fetchedAt || Date.now()) || new Date();
+    const updatedDate = parseDate(base.updatedAt || base.fetchedAt);
 
     return {
-      updatedAt: updatedDate.toISOString(),
+      updatedAt: updatedDate ? updatedDate.toISOString() : null,
       items,
       meta: base.meta && typeof base.meta === 'object' ? base.meta : {},
     };

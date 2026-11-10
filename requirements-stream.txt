@@ -1,0 +1,2 @@
+# Optional: only needed when keys/benzinga_token.txt or BENZINGA_API_KEY is configured.
+websocket-client>=1.8,<2

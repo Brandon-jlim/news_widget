@@ -5,11 +5,14 @@ import argparse
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import socket
 import sys
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -19,6 +22,13 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
+
+try:
+    from .storage import atomic_write_json, read_json
+    from .feed_sources import OFFICIAL_FEEDS, PUBLIC_RSS_FEEDS
+except ImportError:
+    from storage import atomic_write_json, read_json
+    from feed_sources import OFFICIAL_FEEDS, PUBLIC_RSS_FEEDS
 
 
 # Keep an application identifier, but use a browser-compatible User-Agent shape.
@@ -45,7 +55,10 @@ DEFAULT_BROAD_SEARCH = (
     '"nonfarm payrolls" | payrolls | unemployment | jobs | gdp | recession | '
     'treasury | yields | "bond yields" | "10-year" | "2-year" | oil | crude | opec | '
     'tariffs | sanctions | geopolitics | "china stimulus" | "consumer confidence" | '
-    'pmi | "retail sales" | "u.s. stocks" | "wall street" | nasdaq | "s&p 500" | dow'
+    'pmi | "retail sales" | "u.s. stocks" | "wall street" | nasdaq | "s&p 500" | dow | '
+    'earnings | guidance | nvidia | microsoft | apple | amazon | alphabet | google | '
+    'meta | tesla | broadcom | semiconductor | "artificial intelligence" | '
+    'war | missile | ceasefire | iran | taiwan | "export controls" | shutdown | default'
 )
 
 DEFAULT_PREFERRED_DOMAINS = ",".join(
@@ -70,7 +83,7 @@ DEFAULT_REUTERS_SOURCES = (
     "https://www.reuters.com/arc/outboundfeeds/news-sitemap/?outputType=xml",
 )
 
-TAB_FEED_KEYS = ("combined", "reuters", "marketaux")
+TAB_FEED_KEYS = ("combined", "marketaux", "official", "rss", "benzinga", "reuters")
 DEFAULT_REUTERS_OUT = "data/news.reuters.json"
 DEFAULT_MARKETAUX_OUT = "data/news.marketaux.json"
 
@@ -85,6 +98,11 @@ URL_DATE_PATTERNS = (
 )
 
 INDEX_SYMBOLS = {"SPY", "QQQ", "DIA", "IWM", "VIX", "TLT", "USO", "GLD"}
+MEGACAP_SYMBOLS = {"NVDA", "MSFT", "AAPL", "AMZN", "GOOG", "GOOGL", "META", "TSLA", "AVGO", "TSM"}
+MARKET_EVENTS = ("earnings", "guidance", "revenue", "profit", "merger", "acquisition", "bankruptcy",
+                 "default", "export control", "antitrust", "semiconductor", "artificial intelligence",
+                 "nvidia", "microsoft", "apple", "amazon", "alphabet", "tesla", "broadcom",
+                 "war", "missile", "ceasefire", "iran", "taiwan", "shutdown", "hormuz")
 BROAD_ENTITY_TYPES = {"country", "currency", "commodity", "etf", "index", "macro"}
 
 DEFAULT_DEEPL_INSTRUCTIONS = [
@@ -159,6 +177,14 @@ SENTIMENT_DOWN_WORDS = ("fall", "falls", "fell", "down", "drop", "drops", "slip"
 
 class RelayError(RuntimeError):
     pass
+
+
+class RequestFailure(RelayError):
+    def __init__(self, status: int, *, retry_after: float = 0, usage: dict | None = None):
+        super().__init__(f"HTTP {status} 요청 실패")
+        self.status = status
+        self.retry_after = retry_after
+        self.usage = usage or {}
 
 
 @dataclass
@@ -377,7 +403,7 @@ class MarketauxProvider(Provider):
                 response = request_json(
                     request_url,
                     timeout=args.timeout,
-                    retries=args.request_retries,
+                    retries=0,  # Each HTTP attempt consumes quota; retry on the next scheduled cycle.
                     retry_backoff=args.retry_backoff,
                     debug=args.debug,
                 )
@@ -422,7 +448,79 @@ class MarketauxProvider(Provider):
             "snippet": snippet,
             "entities": entities,
             "_score": score,
+            "_source_provider": "marketaux",
         }
+
+
+class MassiveNewsProvider(Provider):
+    """Poll the newest Benzinga headlines through Massive's News v2 REST API."""
+
+    BASE = "https://api.massive.com/benzinga/v2/news"
+    group = "benzinga"
+    label = "Benzinga · Massive"
+
+    def fetch(self, args: argparse.Namespace) -> ProviderResult:
+        if not args.massive_token:
+            raise RelayError("Massive 키가 필요합니다: keys/massive_api_key.txt 또는 MASSIVE_API_KEY")
+        published_after = parse_iso_datetime(args.published_after)
+        if published_after is None:
+            raise RelayError("Massive 시작 시각이 올바르지 않습니다 (--published-after)")
+        # A bounded latest-news snapshot also restores recent headlines on startup
+        # and after disconnection. Re-reading it captures edits without advancing
+        # the original publication timestamp. This is not a full historical export.
+        params = {
+            "limit": args.massive_fetch_limit,
+            "sort": "published.desc",
+            "published.gte": published_after.isoformat(),
+            "fields": "benzinga_id,title,published,last_updated,url,teaser,tickers,channels,tags",
+        }
+        response = request_json(
+            self.BASE + "?" + urlencode(params), timeout=args.timeout,
+            headers={"Authorization": "Bearer " + args.massive_token}, retries=0,
+        )
+        payload = response.payload
+        if not isinstance(payload, dict) or payload.get("status") != "OK" or not isinstance(payload.get("results"), list):
+            raise RelayError("Massive News 응답 형식 또는 구독 권한을 확인하세요 (정상 뉴스 응답이 아님)")
+        items = []
+        invalid = 0
+        for article in payload["results"]:
+            item = self.normalize_article(article, args)
+            if item is None:
+                invalid += 1
+            else:
+                items.append(item)
+        if payload["results"] and not items:
+            raise RelayError("Massive 뉴스 응답에 유효한 ID·제목·발행 시각이 없습니다")
+        # Do not save the raw response or next_url: neither is needed by the UI,
+        # and server-returned pagination links may contain credentials.
+        meta = {"provider": "massive", "group": "benzinga", "label": self.label,
+                "transport": "rest", "returned": len(items), "snapshotLimit": args.massive_fetch_limit,
+                "moreAvailable": bool(payload.get("next_url")), "invalidItems": invalid}
+        if invalid:
+            meta["errors"] = [f"Massive 뉴스 {invalid}건의 필수 필드가 없어 제외했습니다"]
+        return ProviderResult(dedupe_items(items), meta)
+
+    @staticmethod
+    def normalize_article(article: Any, args: argparse.Namespace) -> dict[str, Any] | None:
+        if not isinstance(article, dict):
+            return None
+        identity = clean_text(article.get("benzinga_id"))
+        title = clean_markup_text(article.get("title"))
+        published = parse_datetime_text(article.get("published"))
+        if not identity or not title or not published:
+            return None
+        symbols = article.get("tickers") if isinstance(article.get("tickers"), list) else []
+        snippet = clean_markup_text(article.get("teaser", ""))
+        item = MarketauxProvider().normalize_article({
+            "uuid": "benzinga:" + identity, "title": title, "published_at": published,
+            "source": "Benzinga", "url": clean_text(article.get("url")), "description": snippet,
+            "entities": [{"symbol": symbol, "type": "equity"} for symbol in symbols if isinstance(symbol, str)],
+        }, args)
+        item.update(_source_provider="benzinga", via="Massive",
+                    updatedAt=parse_datetime_text(article.get("last_updated")) or published,
+                    channels=[clean_text(x) for x in (article.get("channels") or []) if isinstance(x, str)])
+        return item
+
 
 class ReutersProvider(Provider):
     XML_ACCEPT = "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.5"
@@ -437,6 +535,7 @@ class ReutersProvider(Provider):
         combined: list[dict[str, Any]] = []
         errors: list[str] = []
         fetched_source_count = 0
+        request_failure = None
         self.date_stats: dict[str, int] = {
             "news_publication_date": 0,
             "lastmod_fallback": 0,
@@ -451,9 +550,11 @@ class ReutersProvider(Provider):
                 fetched_source_count += source_count
                 combined.extend(feed_items)
             except Exception as exc:  # noqa: BLE001
-                errors.append(f"{source}: {exc}")
+                if isinstance(exc, RequestFailure):
+                    request_failure = exc
+                errors.append(f"{redact_url_secrets(source)}: {safe_error(exc, args)}")
                 if args.debug:
-                    print(f"[news_relay][warn] Reuters source failed: {source}: {exc}", file=sys.stderr)
+                    print(f"[news_relay][warn] Reuters source failed: {redact_url_secrets(source)}: {safe_error(exc, args)}", file=sys.stderr)
 
         combined = [item for item in combined if clean_text(item.get("title"))]
         published_after = parse_iso_datetime(args.published_after)
@@ -468,6 +569,8 @@ class ReutersProvider(Provider):
             combined = combined[:raw_limit]
 
         if errors and not combined:
+            if request_failure is not None:
+                raise request_failure
             raise RelayError("Reuters 갱신 실패: " + " | ".join(errors[:3]))
 
         if args.debug:
@@ -482,7 +585,7 @@ class ReutersProvider(Provider):
 
         meta: dict[str, Any] = {
             "provider": "reuters",
-            "sources": sources,
+            "sources": [redact_url_secrets(source) for source in sources],
             "fetched_sources": fetched_source_count,
             "returned": len(combined),
             "source_kind": "sitemap/rss/atom",
@@ -769,39 +872,370 @@ class ReutersProvider(Provider):
         return True
 
 
+class PublicRSSFeedProvider(ReutersProvider):
+    """One independently scheduled RSS/Atom source with conditional requests."""
+
+    group = "rss"
+
+    def __init__(self, spec: dict) -> None:
+        self.spec = spec
+        self.headers: dict[str, str] = {}
+        self.items: list[dict] | None = None
+        self.recommended_interval = 0
+
+    def fetch(self, args: argparse.Namespace) -> ProviderResult:
+        headers = {"User-Agent": USER_AGENT, "Accept": self.XML_ACCEPT, **self.headers}
+        try:
+            with urlopen(Request(self.spec["url"], headers=headers), timeout=args.timeout) as response:
+                body = response.read(4 * 1024 * 1024 + 1)
+                if len(body) > 4 * 1024 * 1024:
+                    raise RelayError("RSS 피드 응답이 너무 큽니다")
+                root = ET.fromstring(body)
+                options = argparse.Namespace(**vars(args))
+                options.reuters_source_label = self.spec["label"]
+                options.category_label = self.spec["category"]
+                kind = strip_ns(root.tag).lower()
+                if kind not in {"rss", "feed"}:
+                    raise RelayError("피드가 RSS/Atom 형식이 아닙니다")
+                ttl = child_text(first_child(root, "channel"), "ttl")
+                self.recommended_interval = int(ttl) * 60 if ttl.isdigit() else 0
+                parse = self.parse_rss if kind == "rss" else self.parse_atom
+                parsed = parse(root, self.spec["url"], options)
+                for item in parsed:
+                    item.update(source=self.spec["label"], _source_provider=self.group,
+                                feedId=self.spec["id"], official=self.group == "official",
+                                contentKind=self.spec.get("content_kind", "official" if self.group == "official" else "reporting"))
+                self.items = parsed
+                self.headers = {}
+                if response.headers.get("ETag"):
+                    self.headers["If-None-Match"] = response.headers["ETag"]
+                if response.headers.get("Last-Modified"):
+                    self.headers["If-Modified-Since"] = response.headers["Last-Modified"]
+        except HTTPError as exc:
+            if exc.code != 304 or self.items is None:
+                raise RequestFailure(exc.code, retry_after=retry_after_seconds(exc.headers)) from exc
+        cutoff = (now_utc() - timedelta(hours=args.official_lookback_hours)) if self.group == "official" else parse_iso_datetime(args.published_after)
+        items = [item for item in (self.items or []) if cutoff is None or self.is_recent_enough(item, cutoff)]
+        return ProviderResult(items, {"label": self.spec["label"], "group": self.group, "returned": len(items),
+                                      "recommendedIntervalSeconds": self.recommended_interval})
+
+
+class OfficialFeedProvider(PublicRSSFeedProvider):
+    group = "official"
+
+
+class BenzingaStreamProvider(Provider):
+    """Optional single news socket. Keeps editorial updates/deletions by article ID."""
+
+    def __init__(self, token: str) -> None:
+        self.token = token
+        self.items: dict[str, dict] = {}
+        self.lock = threading.Lock()
+        self.stop = threading.Event()
+        self.thread = None
+        self.socket = None
+        self.status = {"status": "waiting", "label": "Benzinga", "effectiveIntervalSeconds": 60}
+
+    def handle_message(self, message: str, args: argparse.Namespace) -> None:
+        if message in {"ping", "pong"}:
+            return
+        envelope = json.loads(message)
+        if not isinstance(envelope, dict) or envelope.get("kind") != "news":
+            return
+        data = envelope.get("data") or {}
+        article = data.get("content") or {}
+        identity = str(data.get("id") or article.get("id") or "")
+        if not identity:
+            return
+        with self.lock:
+            if data.get("action") == "deleted":
+                self.items.pop(identity, None)
+                return
+            if data.get("action") not in {"created", "updated"}:
+                return
+            created = parse_datetime_text(article.get("created"))
+            if not created or not clean_text(article.get("title")):
+                return
+            normalized = MarketauxProvider().normalize_article({
+                "uuid": "benzinga:" + identity, "title": clean_markup_text(article["title"]),
+                "published_at": created, "source": "Benzinga", "url": article.get("url", ""),
+                "description": clean_markup_text(article.get("teaser", "")),
+                "entities": [{"symbol": stock.get("name", ""), "type": "equity"} for stock in article.get("stocks", [])],
+            }, args)
+            previous = self.items.get(identity, {})
+            updated = parse_datetime_text(article.get("updated")) or created
+            if previous.get("updatedAt") and parse_iso_datetime(updated) < parse_iso_datetime(previous["updatedAt"]):
+                return
+            normalized.update(_source_provider="benzinga", updatedAt=updated,
+                              firstSeenAt=previous.get("firstSeenAt") or now_iso())
+            self.items[identity] = normalized
+            if len(self.items) > 500:
+                oldest = min(self.items, key=lambda key: item_timestamp(self.items[key]))
+                del self.items[oldest]
+
+    def run(self, args: argparse.Namespace) -> None:
+        try:
+            import websocket
+        except ImportError:
+            with self.lock:
+                self.status.update(status="error", error="Benzinga: pip install -r requirements-stream.txt 필요")
+            return
+        delay = 2
+        while not self.stop.is_set():
+            try:
+                self.socket = websocket.create_connection(
+                    "wss://api.benzinga.com/api/v1/news/stream?" + urlencode({"token": self.token}), timeout=5)
+                last_ping = time.monotonic()
+                last_received = last_ping
+                with self.lock:
+                    self.status.update(status="ok", error="", lastSuccessAt=now_iso())
+                delay = 2
+                while not self.stop.is_set():
+                    try:
+                        opcode, frame = self.socket.recv_data(control_frame=True)
+                        last_received = time.monotonic()
+                        if opcode == websocket.ABNF.OPCODE_CLOSE:
+                            raise RelayError("Benzinga 연결 종료")
+                        if opcode == websocket.ABNF.OPCODE_TEXT:
+                            message = frame.decode("utf-8") if isinstance(frame, bytes) else frame
+                            if message == "ping":
+                                self.socket.send("pong")
+                            self.handle_message(message, args)
+                        with self.lock:
+                            self.status.update(status="ok", error="", lastSuccessAt=now_iso())
+                    except websocket.WebSocketTimeoutException:
+                        if time.monotonic() - last_received > 90:
+                            raise RelayError("Benzinga heartbeat 시간 초과")
+                    if time.monotonic() - last_ping >= 30:
+                        self.socket.send("ping")
+                        last_ping = time.monotonic()
+            except Exception as exc:
+                code = getattr(exc, "status_code", None)
+                # Never include the token-bearing websocket URL or third-party exception body.
+                with self.lock:
+                    self.status.update(status="error", error=f"Benzinga 스트림 연결 오류 ({code or type(exc).__name__})")
+                delay = 3600 if code in {401, 403} else min(delay * 2, 60)
+            finally:
+                if self.socket is not None:
+                    self.socket.close()
+                    self.socket = None
+            self.stop.wait(delay)
+
+    def fetch(self, args: argparse.Namespace) -> ProviderResult:
+        if self.thread is None:
+            self.thread = threading.Thread(target=self.run, args=(argparse.Namespace(**vars(args)),), daemon=True)
+            self.thread.start()
+        with self.lock:
+            cutoff = parse_iso_datetime(args.published_after)
+            items = [dict(item) for item in self.items.values()
+                     if cutoff is None or ReutersProvider.is_recent_enough(item, cutoff)]
+            return ProviderResult(items, {"provider": "benzinga", "source_statuses": {"benzinga": dict(self.status)}})
+
+    def close(self) -> None:
+        self.stop.set()
+        connection = self.socket
+        if connection is not None:
+            connection.abort()
+        if self.thread is not None:
+            self.thread.join(timeout=6)
+
+
 class CombinedProvider(Provider):
-    def __init__(self) -> None:
+    def __init__(self, args: argparse.Namespace | None = None) -> None:
         self.providers: list[tuple[str, Provider]] = [
-            ("marketaux", MarketauxProvider()),
-            ("reuters", ReutersProvider()),
+            ("marketaux", ManagedProvider("marketaux", MarketauxProvider())),
+            ("reuters", ManagedProvider("reuters", ReutersProvider())),
         ]
+        if args is not None:
+            if args.no_reuters_default_feed and not args.reuters_feed:
+                self.providers = [(name, provider) for name, provider in self.providers if name != "reuters"]
+            if args.no_marketaux:
+                self.providers = [(name, provider) for name, provider in self.providers if name != "marketaux"]
+            if not args.no_official_feeds:
+                self.providers.extend((spec["id"], ManagedProvider(spec["id"], OfficialFeedProvider(spec))) for spec in OFFICIAL_FEEDS)
+            if not args.no_public_rss:
+                self.providers.extend((spec["id"], ManagedProvider(spec["id"], PublicRSSFeedProvider(spec))) for spec in PUBLIC_RSS_FEEDS)
+            if args.massive_token and not args.no_massive and not args.no_benzinga:
+                self.providers.append(("massive", ManagedProvider("massive", MassiveNewsProvider())))
+            elif args.benzinga_token and not args.no_benzinga:
+                self.providers.append(("benzinga", BenzingaStreamProvider(args.benzinga_token)))
+        if not self.providers:
+            raise RelayError("활성화된 뉴스 소스가 없습니다. Massive 키 또는 공개 피드 설정을 확인하세요.")
+        self.executor = ThreadPoolExecutor(max_workers=len(self.providers), thread_name_prefix="news-source")
+        self.pending = {}
+        self.latest = {}
 
     def fetch(self, args: argparse.Namespace) -> ProviderResult:
         combined_items: list[dict[str, Any]] = []
         source_meta: list[dict[str, Any]] = []
         errors: list[str] = []
+        statuses: dict[str, Any] = {}
 
         for name, provider in self.providers:
             try:
-                result = provider.fetch(args)
+                future = self.pending.get(name)
+                if future is not None and future.done():
+                    del self.pending[name]
+                    self.latest[name] = future.result()
+                if name not in self.pending:
+                    options = argparse.Namespace(**{key: value for key, value in vars(args).items() if key != "live_translator"})
+                    self.pending[name] = self.executor.submit(provider.fetch, options)
+                if args.watch <= 0:
+                    self.latest[name] = self.pending.pop(name).result()
+                result = self.latest.get(name, ProviderResult([], {"source_statuses": {
+                    name: {"status": "waiting", "label": getattr(provider, "label", name), "group": getattr(provider, "group", name)}
+                }}))
                 combined_items.extend(result.items)
                 source_meta.append({"provider": name, "returned": len(result.items), "meta": result.meta})
+                statuses.update(result.meta.get("source_statuses", {}))
+                errors.extend(result.meta.get("errors", []))
             except Exception as exc:  # noqa: BLE001
-                message = f"{name}: {exc}"
+                message = f"{name}: {safe_error(exc, args)}"
                 errors.append(message)
+                statuses[name] = {"status": "error", "error": safe_error(exc, args)}
                 if args.debug:
                     print(f"[news_relay][warn] combined source failed: {message}", file=sys.stderr)
-
-        if not combined_items and errors:
-            raise RelayError("모든 뉴스 소스 갱신 실패: " + " | ".join(errors[:3]))
 
         meta: dict[str, Any] = {
             "provider": "combined",
             "sources": source_meta,
+            "source_statuses": statuses,
         }
         if errors:
             meta["errors"] = errors[:10]
         return ProviderResult(items=combined_items, meta=meta)
+
+    def close(self) -> None:
+        self.executor.shutdown(wait=True, cancel_futures=True)
+        for _, provider in self.providers:
+            if hasattr(provider, "close"):
+                provider.close()
+
+
+class ManagedProvider(Provider):
+    """Persist successful data and request deadlines independently for each source."""
+
+    def __init__(self, name: str, provider: Provider):
+        self.name = name
+        self.provider = provider
+        self.group = getattr(provider, "group", name) if isinstance(provider, (PublicRSSFeedProvider, MassiveNewsProvider)) else name
+        self.label = provider.spec["label"] if isinstance(provider, PublicRSSFeedProvider) else (provider.label if isinstance(provider, MassiveNewsProvider) else name.title())
+
+    def interval(self, args: argparse.Namespace, usage: dict, source_meta: dict | None = None) -> int:
+        if self.name == "massive":
+            return args.massive_interval
+        if self.name != "marketaux":
+            if isinstance(self.provider, PublicRSSFeedProvider):
+                requested = args.official_interval if self.group == "official" else args.rss_interval
+                return max(requested, self.provider.spec.get("interval", 60),
+                           (source_meta or {}).get("recommendedIntervalSeconds", 0))
+            return args.reuters_interval
+        try:
+            daily_limit = max(1, int(usage.get("daily_limit") or 100))
+            per_minute = max(1, int(usage.get("rate_limit") or 30))
+        except (TypeError, ValueError):
+            daily_limit, per_minute = 100, 30
+        return max(args.marketaux_interval, math.ceil(86400 * 1.04 / daily_limit), math.ceil(60 * 1.04 / per_minute))
+
+    def fetch(self, args: argparse.Namespace) -> ProviderResult:
+        config_keys = ("query", "countries", "lang", "domains", "sort", "marketaux_mode", "fetch_limit",
+                       "must_have_entities", "group_similar", "filter_entities", "lookback_hours",
+                       "explicit_published_after", "reuters_feed", "no_reuters_default_feed", "reuters_lang",
+                       "reuters_fetch_limit", "reuters_sitemap_limit", "allow_undated_reuters", "reuters_source_label",
+                       "provider_label", "category_label", "official_lookback_hours")
+        config = {key: getattr(args, key, None) for key in config_keys}
+        if isinstance(self.provider, PublicRSSFeedProvider):
+            config["rss_source"] = self.provider.spec
+        if self.name == "massive":
+            config["massive_fetch_limit"] = args.massive_fetch_limit
+        # Store only a hash, never credentials or a credential-bearing request URL.
+        config["credential"] = (args.api_key or args.file_marketaux_api_token or args.env_marketaux_api_token) if self.name == "marketaux" else ""
+        if self.name == "massive":
+            config["credential"] = args.massive_token
+        fingerprint = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
+        path = resolve_path(args.state_dir) / f"{self.name}.json"
+        state = read_json(path, {})
+        if not isinstance(state, dict):
+            state = {}
+        # Preserve the rate-limit deadline even when filters change, but never reuse
+        # results from another query. This prevents config edits from bypassing quota.
+        if state.get("fingerprint") != fingerprint:
+            state = {"nextFetchAt": state.get("nextFetchAt"), "effectiveIntervalSeconds": state.get("effectiveIntervalSeconds"),
+                     "meta": {"usage": (state.get("meta") or {}).get("usage", {})}}
+        interval = self.interval(args, (state.get("meta") or {}).get("usage", {}), state.get("meta"))
+        current = now_utc()
+        deadline = parse_iso_datetime(state.get("nextFetchAt"))
+        if deadline is None or current >= deadline:
+            state["lastAttemptAt"] = current.isoformat()
+            # Reserve the slot before network I/O, so a process restart cannot retry for free.
+            state.update(nextFetchAt=(current + timedelta(seconds=interval)).isoformat(), fingerprint=fingerprint)
+            atomic_write_json(path, state)
+            try:
+                result = self.provider.fetch(args)
+                usage = result.meta.get("usage") or {}
+                interval = self.interval(args, usage, result.meta)
+                old_items = {item_identity(item): item for item in state.get("items", [])}
+                for item in result.items:
+                    item["firstSeenAt"] = old_items.get(item_identity(item), {}).get("firstSeenAt") or now_iso()
+                state.update(items=result.items, meta=result.meta, lastSuccessAt=now_utc().isoformat(),
+                             status="ok", error="", effectiveIntervalSeconds=interval)
+                if result.meta.get("errors"):
+                    state.update(status="degraded", error="; ".join(result.meta["errors"])[:300])
+                delay = interval
+                if self.name == "marketaux" and str(usage.get("daily_remaining")) == "0":
+                    # No reset instant is guaranteed by this response: wait a full day.
+                    delay = max(delay, 86400)
+                    state.update(status="limited", error="Marketaux 일일 요청 한도 소진")
+            except Exception as exc:
+                delay = interval
+                status_code = getattr(exc, "status", None)
+                # Reuters wraps per-URL failures, so inspect its safe HTTP summary too.
+                if status_code in {401, 403} or re.search(r"HTTP (401|403)\b", str(exc)):
+                    delay = max(delay, 3600)
+                elif status_code == 429:
+                    delay = max(delay, 60)
+                elif not isinstance(exc, RequestFailure):
+                    delay = max(delay, 300)
+                delay = max(delay, getattr(exc, "retry_after", 0))
+                if str(getattr(exc, "usage", {}).get("daily_remaining")) == "0":
+                    delay = max(delay, 86400)
+                state.update(status="error", error=safe_error(exc, args), effectiveIntervalSeconds=interval)
+                print(f"[news_relay][warn] {self.name}: {state['error']} · {delay:.0f}s 후 재시도", file=sys.stderr)
+            state["nextFetchAt"] = (now_utc() + timedelta(seconds=delay)).isoformat()
+            state["fingerprint"] = fingerprint
+            atomic_write_json(path, state)
+        elif not state.get("lastSuccessAt") and not state.get("error"):
+            state.update(status="waiting", error="요청 간격 대기 중")
+        status = {key: state.get(key) for key in ("status", "error", "lastAttemptAt", "lastSuccessAt", "nextFetchAt", "effectiveIntervalSeconds")}
+        status.update(label=self.label, group=self.group)
+        if self.name == "marketaux":
+            status["usage"] = (state.get("meta") or {}).get("usage", {})
+        meta = dict(state.get("meta") or {})
+        meta.update(provider=self.name, source_statuses={self.name: status})
+        if status.get("error"):
+            meta["errors"] = [f"{self.name}: {status['error']}"]
+        cutoff = (now_utc() - timedelta(hours=args.official_lookback_hours)) if self.group == "official" else parse_iso_datetime(args.published_after)
+        items = [item for item in (state.get("items") or []) if cutoff is None or ReutersProvider.is_recent_enough(item, cutoff)]
+        return ProviderResult(items=items, meta=meta)
+
+
+def safe_error(exc: Exception, args: argparse.Namespace) -> str:
+    message = redact_url_secrets(str(exc))
+    for key in ("api_key", "file_marketaux_api_token", "env_marketaux_api_token", "deepl_api_key",
+                "translate_api_key", "file_deepl_api_key", "env_deepl_api_key", "benzinga_token", "massive_token"):
+        secret = getattr(args, key, "")
+        if secret:
+            message = message.replace(secret, "***")
+    return clean_markup_text(message)[:300]
+
+
+def retry_after_seconds(headers: Any) -> float:
+    value = headers.get("Retry-After", "")
+    try:
+        return max(0.0, float(value))
+    except (ValueError, TypeError):
+        when = parse_iso_datetime(value)
+        return max(0.0, (when - now_utc()).total_seconds()) if when else 0.0
 
 
 
@@ -1015,6 +1449,9 @@ def request_json(
                 payload = json.loads(raw)
                 return HttpResponse(payload=payload, headers=dict(response.headers.items()))
         except HTTPError as exc:
+            if exc.code in {401, 403, 429, 456} or retry_after_seconds(exc.headers) > 0:
+                raise RequestFailure(exc.code, retry_after=retry_after_seconds(exc.headers),
+                                     usage=extract_usage_headers(dict(exc.headers.items()))) from exc
             body = exc.read().decode("utf-8", errors="replace")
             detail = body
             try:
@@ -1023,7 +1460,7 @@ def request_json(
             except json.JSONDecodeError:
                 pass
 
-            retryable = exc.code in {408, 425, 429, 500, 502, 503, 504}
+            retryable = exc.code in {408, 425, 500, 502, 503, 504}
             last_error = RelayError(f"HTTP {exc.code} 요청 실패: {detail}")
             if retryable and attempt < retries:
                 sleep_seconds = retry_backoff * (attempt + 1)
@@ -1085,7 +1522,7 @@ def request_text(
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         if debug:
-            print(f"[news_relay][debug] text request attempt={attempt + 1}/{retries + 1} url={url}")
+            print(f"[news_relay][debug] text request attempt={attempt + 1}/{retries + 1} url={redact_url_secrets(url)}")
         request = Request(url, headers=request_headers, method=method, data=data)
         try:
             with urlopen(request, timeout=timeout) as response:
@@ -1093,6 +1530,8 @@ def request_text(
                 raw = response.read().decode(charset, errors="replace")
                 return TextResponse(text=raw, headers=dict(response.headers.items()))
         except HTTPError as exc:
+            if exc.code in {401, 403, 429} or retry_after_seconds(exc.headers) > 0:
+                raise RequestFailure(exc.code, retry_after=retry_after_seconds(exc.headers)) from exc
             body = exc.read().decode("utf-8", errors="replace")
             detail = clean_text(body)[:800]
             retryable = exc.code in {408, 425, 429, 500, 502, 503, 504}
@@ -1194,12 +1633,17 @@ def build_marketaux_query(args: argparse.Namespace) -> str:
 
 def has_market_signal(title: str, snippet: str = "", entities: list[dict[str, Any]] | None = None) -> bool:
     text = f"{clean_text(title)} {clean_text(snippet)}".lower()
-    if any(term in text for term in MARKET_SIGNAL_TERMS):
+    if any(term_matches(term, text) for term in (*MARKET_SIGNAL_TERMS, *MARKET_EVENTS)):
         return True
 
     entity_types = {clean_text((entity or {}).get("type")).lower() for entity in (entities or [])}
     symbols = {clean_text((entity or {}).get("symbol")).upper() for entity in (entities or [])}
-    return bool(entity_types & BROAD_ENTITY_TYPES or symbols & INDEX_SYMBOLS)
+    return bool(entity_types & BROAD_ENTITY_TYPES or symbols & (INDEX_SYMBOLS | MEGACAP_SYMBOLS))
+
+
+def term_matches(term: str, text: str) -> bool:
+    # Avoid "fed" in "federation", "war" in "award", "oil" in "soil", etc.
+    return bool(re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", text)) if term.isascii() else term in text
 
 
 def score_article(article: dict[str, Any]) -> float:
@@ -1281,7 +1725,7 @@ def score_article(article: dict[str, Any]) -> float:
         "시장": 3,
     }
     for keyword, weight in weights.items():
-        if keyword in text:
+        if term_matches(keyword, text):
             score += weight
 
     source_bonus = {
@@ -1302,9 +1746,11 @@ def score_article(article: dict[str, Any]) -> float:
         score += 3
     if symbols & INDEX_SYMBOLS:
         score += 4
+    if symbols & MEGACAP_SYMBOLS or any(term_matches(term, text) for term in MARKET_EVENTS):
+        score += 10
 
     equity_symbols = [symbol for symbol in symbols if symbol and symbol not in INDEX_SYMBOLS]
-    if len(equity_symbols) == 1 and score < 10:
+    if len(equity_symbols) == 1 and score < 10 and not symbols & MEGACAP_SYMBOLS:
         score -= 4
 
     published_at = parse_iso_datetime(article.get("published_at") or article.get("publishedAt"))
@@ -1391,17 +1837,20 @@ def apply_broad_market_filter(items: list[dict[str, Any]], args: argparse.Namesp
     # Keep the overlay market-focused by requiring a finance/market signal for
     # Reuters-only metadata entries unless the user deliberately lowers the score
     # threshold to 0.
-    if args.provider not in {"marketaux", "reuters", "combined"} or args.marketaux_mode == "watchlist":
+    if args.provider == "official" or args.marketaux_mode == "watchlist" or args.min_overlay_score <= 0:
         return items
 
     filtered: list[dict[str, Any]] = []
     for item in items:
+        # Corporate boilerplate often lists markets and risks unrelated to the
+        # announcement. Require relevance in the headline for press releases.
+        if item.get("contentKind") == "press_release" and not has_market_signal(item.get("title", "")):
+            continue
         score_ok = float(item.get("_score") or 0) >= args.min_overlay_score
-        needs_market_signal = item.get("_source_provider") == "reuters" and args.min_overlay_score > 0
-        signal_ok = not needs_market_signal or bool(item.get("_market_signal"))
+        signal_ok = bool(item.get("official")) or has_market_signal(item.get("title", ""), item.get("snippet", ""), item.get("entities", []))
         if score_ok and signal_ok:
             filtered.append(item)
-    return filtered or items
+    return filtered
 
 
 def sort_items(items: list[dict[str, Any]], *, rank_mode: str = "score") -> list[dict[str, Any]]:
@@ -1514,7 +1963,7 @@ def apply_provider_aware_market_filter(items: list[dict[str, Any]], args: argpar
     A single merged score filter can make the combined tab look source-biased:
     for example, many high-scoring Reuters rows can leave fresh Marketaux rows
     out, even though those Marketaux rows are visible in the Marketaux tab.
-    Provider-aware filtering preserves each source's own fallback first; the
+    Provider-aware filtering evaluates each source independently; the
     combined tab then simply ranks the eligible union by freshness.
     """
     if clean_text(getattr(args, "provider", "")).lower() != "combined":
@@ -1526,7 +1975,7 @@ def apply_provider_aware_market_filter(items: list[dict[str, Any]], args: argpar
         if not provider_items:
             continue
         filtered_parts.extend(apply_broad_market_filter(provider_items, clone_args_for_feed(args, provider_name)))
-    return dedupe_items(filtered_parts) or items
+    return dedupe_items(filtered_parts)
 
 
 def count_time_precision(items: list[dict[str, Any]]) -> dict[str, int]:
@@ -1684,8 +2133,7 @@ def load_translation_cache(path_text: str) -> tuple[Path | None, dict[str, Any]]
 def save_translation_cache(path: Path | None, cache: dict[str, Any]) -> None:
     if path is None:
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(path, cache)
 
 
 def build_translator(args: argparse.Namespace) -> Translator:
@@ -1710,43 +2158,98 @@ def translation_cache_key(item: dict[str, Any], args: argparse.Namespace) -> str
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
-def translate_items(items: list[dict[str, Any]], args: argparse.Namespace) -> tuple[list[dict[str, Any]], int]:
-    translator = build_translator(args)
-    if isinstance(translator, NullTranslator):
-        return items, 0
+class BackgroundTranslator:
+    """Publish originals immediately; translate one headline at a time without blocking collection."""
 
+    def __init__(self, args: argparse.Namespace):
+        self.args = argparse.Namespace(**{key: value for key, value in vars(args).items() if key != "live_translator"})
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="headline-translation")
+        self.future = None
+        self.active_key = None
+        self.cache_path, self.cache = load_translation_cache(args.translate_cache)
+        self.replacements = load_replacements(args.translate_terms_file)
+        self.failed = {}
+        self.retry_at = 0.0
+
+    def translate(self, items: list[dict], args: argparse.Namespace) -> tuple[list[dict], int]:
+        billed = 0
+        if self.future is not None and self.future.done():
+            try:
+                completed, billed = self.future.result()
+                item = completed[0]
+                if item.get("titleKo"):
+                    self.cache[self.active_key] = item["titleKo"]
+                    self.failed.pop(self.active_key, None)
+                else:
+                    self.failed[self.active_key] = time.monotonic() + 300
+                    error = item.get("translationError", "")
+                    if re.search(r"HTTP (401|403|429|456)\b", error) or "키" in error:
+                        self.retry_at = time.monotonic() + 3600
+            except Exception:
+                self.failed[self.active_key] = time.monotonic() + 300
+            self.future = None
+        output = []
+        for item in items:
+            key = translation_cache_key(item, args)
+            cached = self.cache.get(key)
+            if cached:
+                output.append(dict(item, titleKo=apply_replacements(cached, self.replacements), translationStatus="cached"))
+                continue
+            failed = self.failed.get(key, 0) > time.monotonic() or self.retry_at > time.monotonic()
+            output.append(dict(item, titleKo="", translationStatus="failed" if failed else "pending"))
+            if not failed and self.future is None:
+                self.active_key = key
+                self.future = self.executor.submit(translate_items, [dict(item)], self.args)
+        return output, billed
+
+    def close(self):
+        self.executor.shutdown(wait=True, cancel_futures=True)
+
+
+def translate_items(items: list[dict[str, Any]], args: argparse.Namespace) -> tuple[list[dict[str, Any]], int]:
+    if args.translate_provider == "none":
+        return [dict(item, translationStatus="disabled") for item in items], 0
+    if getattr(args, "live_translator", None) is not None:
+        return args.live_translator.translate(items, args)
     replacements = load_replacements(args.translate_terms_file)
     cache_path, cache = load_translation_cache(args.translate_cache)
     total_billed = 0
     translated_items: list[dict[str, Any]] = []
+    translator = None
+    translator_error = ""
+    try:
+        translator = build_translator(args)
+    except RelayError as exc:
+        translator_error = safe_error(exc, args)
+        print(f"[news_relay][warn] translation: {translator_error}", file=sys.stderr)
 
     for item in items:
-        title = clean_text(item.get("title"))
         cache_key = translation_cache_key(item, args)
-        translated_text = ""
-        from_cache = False
-
-        if cache_key in cache:
-            translated_text = clean_text(cache.get(cache_key))
-            from_cache = True
+        item_copy = dict(item)
+        # An original headline must never be labeled as a Korean translation.
+        item_copy.update(titleKo="", translationStatus="failed")
+        item_copy.pop("translationError", None)
+        cached = clean_text(cache.get(cache_key))
+        if cached:
+            item_copy.update(titleKo=apply_replacements(cached, replacements), translationStatus="cached")
+        elif translator_error:
+            item_copy["translationError"] = translator_error
         else:
             try:
                 result = translator.translate_item(item, args)
-                translated_text = result.text
-                total_billed += result.billed_characters
+                translated_text = clean_text(result.text)
+                if not translated_text:
+                    raise RelayError("번역문이 비어 있습니다")
                 cache[cache_key] = translated_text
-                from_cache = result.from_cache
-            except Exception as exc:  # noqa: BLE001
-                if args.debug:
-                    print(f"[news_relay][warn] translate failed: {exc}", file=sys.stderr)
-                translated_text = title
-
-        translated_text = apply_replacements(translated_text, replacements)
-        item_copy = dict(item)
-        item_copy["titleKo"] = translated_text or title
-        item_copy["_translated_from_cache"] = from_cache
+                total_billed += result.billed_characters
+                item_copy.update(titleKo=apply_replacements(translated_text, replacements), translationStatus="translated")
+            except Exception as exc:
+                message = safe_error(exc, args)
+                item_copy["translationError"] = message
+                print(f"[news_relay][warn] translation: {message}", file=sys.stderr)
+                if isinstance(exc, RequestFailure) and exc.status in {401, 403, 429, 456}:
+                    translator_error = message
         translated_items.append(item_copy)
-
     save_translation_cache(cache_path, cache)
     return translated_items, total_billed
 
@@ -1756,11 +2259,28 @@ def strip_internal_fields(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def write_payload(out_path: Path, items: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
-    payload: dict[str, Any] = {"updatedAt": now_iso(), "items": items}
-    if meta:
-        payload["meta"] = meta
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta = dict(meta or {})
+    statuses = meta.get("source_statuses") or {}
+    previous = read_json(out_path, {})
+    if not isinstance(previous, dict):
+        previous = {}
+    failed = statuses and all(value.get("status") in {"error", "waiting"} for value in statuses.values())
+    if failed and isinstance(previous.get("items"), list):
+        items = previous["items"]
+        updated_at = previous.get("updatedAt")
+        meta["retained"] = True
+        for key in ("final_source_counts", "final_time_precision_counts"):
+            if key in (previous.get("meta") or {}):
+                meta[key] = previous["meta"][key]
+    else:
+        successes = [value.get("lastSuccessAt") for value in statuses.values() if value.get("lastSuccessAt")]
+        updated_at = max(successes) if successes else (None if failed else now_iso())
+    meta["translation_failed_count"] = sum(item.get("translationStatus") == "failed" for item in items)
+    meta["translation_pending_count"] = sum(item.get("translationStatus") == "pending" for item in items)
+    meta["final_count"] = len(items)
+    meta["checkedAt"] = now_iso()
+    payload: dict[str, Any] = {"updatedAt": updated_at, "items": items, "meta": meta}
+    atomic_write_json(out_path, payload)
 
 
 def resolve_output_path(path_text: str | Path) -> Path:
@@ -1848,8 +2368,15 @@ def build_output_meta(
             "generated_from": "combined",
             "source": source_meta_for_provider(result_meta, feed_key),
         }
-        if result_meta.get("errors"):
-            meta["errors"] = result_meta.get("errors")
+    statuses = result_meta.get("source_statuses") or {}
+    if feed_key != "combined":
+        statuses = {key: value for key, value in statuses.items() if key == feed_key or value.get("group") == feed_key}
+    if feed_key != "combined" and not statuses:
+        statuses = {feed_key: {"status": "disabled", "label": feed_key}}
+    meta["source_statuses"] = statuses
+    if statuses:
+        meta["errors"] = [f"{name}: {value['error']}" for name, value in statuses.items() if value.get("error")]
+    meta["staleAfterSeconds"] = max(180, args.watch * 3)
 
     meta["feed_key"] = feed_key
     meta["candidate_source_counts"] = count_source_providers(candidate_items)
@@ -1862,6 +2389,8 @@ def build_output_meta(
     meta["filtered_count"] = len(filtered_items)
     meta["final_count"] = len(final_items)
     meta["rank_mode"] = clean_text(getattr(args, "rank_mode", "fresh") or "fresh")
+    if feed_key == "official":
+        meta["articleStaleAfterSeconds"] = args.official_lookback_hours * 3600
     if feed_key == "combined":
         meta["min_reuters_items"] = max(int(getattr(args, "min_reuters_items", 0) or 0), 0)
     meta["translate_provider"] = clean_text(args.translate_provider or "none")
@@ -1931,28 +2460,14 @@ def write_single_feed(result: ProviderResult, candidate_items: list[dict[str, An
 
 
 def write_tab_feeds(result: ProviderResult, raw_items: list[dict[str, Any]], args: argparse.Namespace) -> None:
-    combined_candidates = dedupe_items(raw_items)
-    marketaux_candidates = dedupe_items(provider_filtered_items(raw_items, "marketaux"))
-    reuters_candidates = dedupe_items(provider_filtered_items(raw_items, "reuters"))
-
-    feed_candidates = {
-        "combined": combined_candidates,
-        "marketaux": marketaux_candidates,
-        "reuters": reuters_candidates,
-    }
-    provider_filtered = {
-        "marketaux": apply_broad_market_filter(marketaux_candidates, clone_args_for_feed(args, "marketaux")),
-        "reuters": apply_broad_market_filter(reuters_candidates, clone_args_for_feed(args, "reuters")),
-    }
-    # Combined should mean: take the eligible Marketaux and Reuters pools, then
-    # show the newest items across both. Do not score-filter the merged pool in
-    # one pass, because one provider can otherwise suppress the other's fresh
-    # tab-visible headlines.
-    feed_filtered = {
-        "combined": dedupe_items(provider_filtered["marketaux"] + provider_filtered["reuters"]),
-        "marketaux": provider_filtered["marketaux"],
-        "reuters": provider_filtered["reuters"],
-    }
+    cutoff = parse_iso_datetime(args.published_after)
+    # Keep the official archive in its own tab without passing old releases off as current news.
+    combined_candidates = dedupe_items([item for item in raw_items if cutoff is None or ReutersProvider.is_recent_enough(item, cutoff)])
+    feed_candidates = {key: dedupe_items(provider_filtered_items(raw_items, key)) for key in TAB_FEED_KEYS if key != "combined"}
+    feed_candidates["combined"] = combined_candidates
+    feed_filtered = {key: apply_broad_market_filter(items, clone_args_for_feed(args, key)) for key, items in feed_candidates.items() if key != "combined"}
+    feed_filtered["combined"] = dedupe_items([item for items in feed_filtered.values() for item in items
+                                             if cutoff is None or ReutersProvider.is_recent_enough(item, cutoff)])
     feed_selected = {
         key: select_items_for_feed(feed_filtered[key], args, key)
         for key in TAB_FEED_KEYS
@@ -1971,6 +2486,9 @@ def write_tab_feeds(result: ProviderResult, raw_items: list[dict[str, Any]], arg
         "combined": args.out,
         "reuters": args.reuters_out,
         "marketaux": args.marketaux_out,
+        "official": args.official_out,
+        "rss": args.rss_out,
+        "benzinga": args.benzinga_out,
     }
 
     for key in TAB_FEED_KEYS:
@@ -1985,31 +2503,16 @@ def write_tab_feeds(result: ProviderResult, raw_items: list[dict[str, Any]], arg
         )
         write_payload(resolve_output_path(outputs[key]), strip_internal_fields(feed_translated[key]), meta=meta)
 
-    print(
-        "[news_relay] wrote tab feeds "
-        f"combined={len(feed_translated['combined'])} -> {outputs['combined']}; "
-        f"reuters={len(feed_translated['reuters'])} -> {outputs['reuters']}; "
-        f"marketaux={len(feed_translated['marketaux'])} -> {outputs['marketaux']}"
-    )
-
-    candidate_counts = count_source_providers(combined_candidates)
-    combined_eligible_counts = count_source_providers(feed_filtered["combined"])
-    combined_final_counts = count_source_providers(feed_selected["combined"])
-    combined_precision_counts = count_time_precision(feed_selected["combined"])
-    print(
-        "[news_relay] sources "
-        f"candidates marketaux={candidate_counts.get('marketaux', 0)} reuters={candidate_counts.get('reuters', 0)}; "
-        f"eligible marketaux={combined_eligible_counts.get('marketaux', 0)} reuters={combined_eligible_counts.get('reuters', 0)}; "
-        f"combined final marketaux={combined_final_counts.get('marketaux', 0)} reuters={combined_final_counts.get('reuters', 0)}; "
-        f"time exact={combined_precision_counts.get('exact', 0)} date-only={combined_precision_counts.get('date-only', 0)} missing={combined_precision_counts.get('missing', 0)}"
-    )
-    print(
-        "[news_relay] tab final counts "
-        f"combined={len(feed_selected['combined'])} reuters={len(feed_selected['reuters'])} marketaux={len(feed_selected['marketaux'])}"
-    )
-
-    for error in (result.meta.get("errors") or [])[:3]:
-        print(f"[news_relay][warn] source error: {error}", file=sys.stderr)
+    report = {
+        "counts": {key: len(value) for key, value in feed_translated.items()},
+        "sources": {key: {"status": value.get("status"), "interval": value.get("effectiveIntervalSeconds"),
+                          "daily_limit": (value.get("usage") or {}).get("daily_limit")}
+                    for key, value in result.meta.get("source_statuses", {}).items()},
+    }
+    signature = json.dumps(report, sort_keys=True)
+    if signature != getattr(args, "_last_report", None):
+        print("[news_relay] " + signature)
+        args._last_report = signature
 
     if args.debug:
         print(f"[news_relay][debug] translate_provider= {clean_text(args.translate_provider or 'none')}")
@@ -2025,13 +2528,18 @@ def write_tab_feeds(result: ProviderResult, raw_items: list[dict[str, Any]], arg
 
 
 def refresh_once(provider: Provider, args: argparse.Namespace) -> None:
+    if not args.explicit_published_after:
+        args.published_after = (now_utc() - timedelta(hours=max(args.lookback_hours, 1))).strftime("%Y-%m-%dT%H:%M")
     result = provider.fetch(args)
-    raw_items = list(result.items)
+    raw_items = [item for item in result.items if not parse_iso_datetime(item.get("publishedAt"))
+                 or parse_iso_datetime(item["publishedAt"]) <= now_utc() + timedelta(minutes=5)]
 
     if getattr(args, "tab_feeds", False) and args.provider == "combined":
         write_tab_feeds(result, raw_items, args)
         return
 
+    cutoff = parse_iso_datetime(args.published_after)
+    raw_items = [item for item in raw_items if cutoff is None or ReutersProvider.is_recent_enough(item, cutoff)]
     candidate_items = dedupe_items(raw_items)
     filtered_items = apply_provider_aware_market_filter(candidate_items, args)
     write_single_feed(result, candidate_items, filtered_items, args)
@@ -2040,18 +2548,36 @@ def refresh_once(provider: Provider, args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="marketaux/Reuters 뉴스를 오버레이용 JSON으로 정규화하고, 필요시 DeepL로 한국어 헤드라인을 생성합니다. API 키는 keys/*.txt 에서 자동으로 읽을 수 있습니다.")
 
-    parser.add_argument("--provider", choices=["marketaux", "reuters", "combined"], default="combined")
+    parser.add_argument("--provider", choices=["marketaux", "reuters", "massive", "combined"], default="combined")
     parser.add_argument("--out", default="data/news.live.json")
     parser.add_argument("--tab-feeds", action="store_true", help="combined 모드에서 통합/Reuters/Marketaux 탭용 JSON을 한 번에 생성합니다")
     parser.add_argument("--reuters-out", default=DEFAULT_REUTERS_OUT, help="--tab-feeds 사용 시 Reuters 탭 JSON 출력 경로")
     parser.add_argument("--marketaux-out", default=DEFAULT_MARKETAUX_OUT, help="--tab-feeds 사용 시 Marketaux 탭 JSON 출력 경로")
     parser.add_argument("--limit", type=int, default=5)
-    parser.add_argument("--fetch-limit", type=int, default=20)
+    parser.add_argument("--fetch-limit", type=int, default=50)
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--request-retries", type=int, default=2)
     parser.add_argument("--retry-backoff", type=float, default=1.5)
     parser.add_argument("--watch", type=int, default=0)
+    parser.add_argument("--marketaux-interval", type=int, default=15)
+    parser.add_argument("--no-marketaux", action="store_true", help="통합 수집에서 Marketaux를 제외")
+    parser.add_argument("--massive-key-file", default="")
+    parser.add_argument("--massive-interval", type=int, default=10)
+    parser.add_argument("--massive-fetch-limit", type=int, default=200, help="매 조회 시 확인할 최신 Benzinga 뉴스 수 (1~1000)")
+    parser.add_argument("--no-massive", action="store_true")
+    parser.add_argument("--reuters-interval", type=int, default=45)
+    parser.add_argument("--state-dir", default="data/.relay-cache")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--official-out", default="data/news.official.json")
+    parser.add_argument("--rss-out", default="data/news.rss.json")
+    parser.add_argument("--rss-interval", type=int, default=120, help="공개 RSS 조회 간격. 소스 권장 간격/TTL이 더 길면 우선 적용")
+    parser.add_argument("--no-public-rss", action="store_true")
+    parser.add_argument("--benzinga-out", default="data/news.benzinga.json")
+    parser.add_argument("--official-interval", type=int, default=60)
+    parser.add_argument("--official-lookback-hours", type=int, default=168)
+    parser.add_argument("--no-official-feeds", action="store_true")
+    parser.add_argument("--no-benzinga", action="store_true")
+    parser.add_argument("--benzinga-key-file", default="")
 
     parser.add_argument("--api-key", default="")
     parser.add_argument("--key-dir", default="keys")
@@ -2063,7 +2589,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--country", default="")  # compatibility only
 
     parser.add_argument("--marketaux-mode", choices=["broad", "indices", "watchlist"], default="broad")
-    parser.add_argument("--countries", default="us")
+    parser.add_argument("--countries", default="", help="기본 전세계: 미국 증시에 영향을 주는 해외 사건도 수집")
     parser.add_argument("--domains", default="")
     parser.add_argument("--published-after", default="")
     parser.add_argument("--must-have-entities", action="store_true", default=False)
@@ -2105,6 +2631,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--aws-region", default="", help=argparse.SUPPRESS)  # backward compatibility
 
     args = parser.parse_args()
+    if min(args.marketaux_interval, args.massive_interval, args.reuters_interval, args.official_interval, args.rss_interval, args.official_lookback_hours, args.limit, args.timeout) <= 0 or args.watch < 0:
+        parser.error("요청 간격과 --limit 은 양수여야 합니다")
+    if not 1 <= args.massive_fetch_limit <= 1000:
+        parser.error("--massive-fetch-limit 은 1~1000 이어야 합니다")
+    args.explicit_published_after = args.published_after
 
     load_env_file(PROJECT_ROOT / ".env.local")
     load_env_file(PROJECT_ROOT / ".env")
@@ -2129,6 +2660,14 @@ def parse_args() -> argparse.Namespace:
 
     args.file_marketaux_api_token, args.file_marketaux_api_token_path = first_existing_secret(marketaux_candidates)
     args.file_deepl_api_key, args.file_deepl_api_key_path = first_existing_secret(deepl_candidates)
+    benzinga_candidates = [resolve_path(args.benzinga_key_file)] if args.benzinga_key_file else []
+    benzinga_candidates.extend([key_dir / "benzinga_token.txt", key_dir / "benzinga.txt"])
+    args.benzinga_token = os.getenv("BENZINGA_API_KEY", "") or first_existing_secret(benzinga_candidates)[0]
+    massive_candidates = [key_dir / "massive_api_key.txt", key_dir / "massive_token.txt"]
+    if args.massive_key_file:
+        args.massive_token = load_secret_from_file(resolve_path(args.massive_key_file))[0]
+    else:
+        args.massive_token = os.getenv("MASSIVE_API_KEY", "") or first_existing_secret(massive_candidates)[0]
 
     if args.use_preferred_domains and not args.domains:
         args.domains = DEFAULT_PREFERRED_DOMAINS
@@ -2147,11 +2686,13 @@ def parse_args() -> argparse.Namespace:
 def build_provider(args: argparse.Namespace) -> Provider:
     provider_name = clean_text(args.provider).lower()
     if provider_name == "marketaux":
-        return MarketauxProvider()
+        return ManagedProvider("marketaux", MarketauxProvider())
     if provider_name == "reuters":
-        return ReutersProvider()
+        return ManagedProvider("reuters", ReutersProvider())
+    if provider_name == "massive":
+        return ManagedProvider("massive", MassiveNewsProvider())
     if provider_name == "combined":
-        return CombinedProvider()
+        return CombinedProvider(args)
     raise RelayError(f"지원하지 않는 provider 입니다: {args.provider}")
 
 
@@ -2161,17 +2702,29 @@ def main() -> int:
 
     try:
         if args.watch > 0:
+            if args.translate_provider != "none":
+                args.live_translator = BackgroundTranslator(args)
             while True:
+                started = time.monotonic()
                 try:
                     refresh_once(provider, args)
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[news_relay] refresh failed: {exc}", file=sys.stderr)
-                time.sleep(args.watch)
+                    print(f"[news_relay] refresh failed: {safe_error(exc, args)}", file=sys.stderr)
+                time.sleep(max(0.05, args.watch - (time.monotonic() - started)))
         else:
             refresh_once(provider, args)
+            saved = read_json(resolve_output_path(args.out), {})
+            statuses = (saved.get("meta") or {}).get("source_statuses") or {}
+            if statuses and all(value.get("status") == "error" for value in statuses.values()):
+                return 1
     except KeyboardInterrupt:
         print("\n[news_relay] stopped")
         return 0
+    finally:
+        if hasattr(provider, "close"):
+            provider.close()
+        if getattr(args, "live_translator", None) is not None:
+            args.live_translator.close()
     return 0
 
 
