@@ -10,17 +10,7 @@ window.NEWS_WIDGET_CONFIG = {
   clickOpensArticle: true,
   linkTarget: '_blank',
   linkFallbackMode: 'none',
-  articleLink: {
-    // original | googleTranslate | deeplText
-    // googleTranslate: 기사 URL을 Google Translate 웹사이트 번역으로 엽니다.
-    // deeplText: 기사 URL이 아니라 제목/요약 텍스트를 DeepL 웹 번역기에 넘깁니다.
-    // Benzinga는 별도 처리: 한국어판 대응 기사 우선, 미확인 시 원문+한국어판 검색.
-    mode: 'googleTranslate',
-    sourceLang: 'en',
-    targetLang: 'ko',
-    uiLang: 'ko',
-    maxDeepLTextChars: 3500,
-  },
+  // 헤드라인은 위젯 안의 한국어 내용 창을 엽니다. 원문·한국어판 링크는 그 아래에 표시합니다.
   emptyTitle: '표시할 뉴스가 없습니다',
   emptyMessage: '피드가 비어 있거나 아직 업데이트되지 않았습니다.',
   source: {

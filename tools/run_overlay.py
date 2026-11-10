@@ -197,6 +197,8 @@ def build_server_cmd(args: argparse.Namespace) -> list[str]:
         "--marketaux-out", args.marketaux_out, "--limit", str(args.limit),
         "--official-out", args.official_out, "--benzinga-out", args.benzinga_out,
         "--rss-out", args.rss_out,
+        "--translate-provider", args.translate_provider, "--translate-source", args.translate_source,
+        "--translate-terms-file", args.translate_terms_file, "--massive-key-file", args.massive_key_file,
     ]
     if not args.tabs or args.provider != "combined":
         cmd.append("--no-tabs")

@@ -63,7 +63,7 @@
     connectEvents();
     scheduleClockRefresh();
     updateWallClocks();
-    window.NewsArticleLinks.watch(() => { state.renderKey = null; render(); });
+    window.NewsArticleLinks.watch(() => { state.renderKey = null; render(); window.NewsArticleReader.updateLinks(); });
 
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
@@ -557,12 +557,12 @@
       let titleNode;
 
       if (hasUrl) {
-        const linkEl = document.createElement('a');
-        linkEl.href = resolveArticleUrl(item);
+        const linkEl = document.createElement('button');
+        linkEl.type = 'button';
+        linkEl.setAttribute('aria-haspopup', 'dialog');
+        linkEl.setAttribute('aria-controls', 'article-reader');
         linkEl.className = 'news-card__title-link';
         linkEl.textContent = titleText;
-        linkEl.target = runtimeConfig.linkTarget || '_blank';
-        linkEl.rel = 'noopener noreferrer';
         linkEl.addEventListener('click', (event) => {
           if (state.editMode || !runtimeConfig.clickOpensArticle) {
             event.preventDefault();
@@ -613,25 +613,6 @@
       publicationEl.textContent = publication.text;
       publicationEl.title = publication.detail;
       card.appendChild(publicationEl);
-      const benzingaLink = window.NewsArticleLinks.resolve(item);
-      if (benzingaLink) {
-        const links = document.createElement('div');
-        links.className = 'news-card__links';
-        const label = document.createElement('span');
-        label.textContent = benzingaLink.kind === 'korean' ? '한국어판 연결' : '원문 연결';
-        label.title = benzingaLink.kind === 'korean' ? `제목·발행 시각을 대조한 한국어 기사: ${benzingaLink.title}` : '대응 한국어 기사를 확인하지 못해 영문 원문을 엽니다.';
-        links.appendChild(label);
-        const alternative = benzingaLink.original || benzingaLink.search;
-        if (alternative) {
-          const link = document.createElement('a');
-          link.href = alternative;
-          link.textContent = benzingaLink.original ? '영문 원문 ↗' : '한국어판 검색 ↗';
-          link.target = runtimeConfig.linkTarget || '_blank';
-          link.rel = 'noopener noreferrer';
-          links.appendChild(link);
-        }
-        card.appendChild(links);
-      }
       newsListEl.appendChild(card);
     });
     if (state.heldItems) newsListEl.scrollTop = scrollPosition;
@@ -1031,78 +1012,9 @@
     return String(item?.url || '').trim();
   }
 
-  function resolveArticleUrl(item) {
-    const originalUrl = getOriginalArticleUrl(item);
-    if (!/^https?:\/\//i.test(originalUrl)) {
-      return '';
-    }
-
-    const linkConfig = runtimeConfig.articleLink || {};
-    const benzingaLink = window.NewsArticleLinks.resolve(item);
-    if (benzingaLink) return benzingaLink.url;
-    const mode = String(linkConfig.mode || 'original').trim();
-
-    if (mode === 'googleTranslate') {
-      return buildGoogleTranslateArticleUrl(originalUrl, linkConfig);
-    }
-
-    if (mode === 'deeplText') {
-      return buildDeepLTextUrl(item, linkConfig) || originalUrl;
-    }
-
-    return originalUrl;
-  }
-
-  function buildGoogleTranslateArticleUrl(originalUrl, linkConfig) {
-    const translateUrl = new URL('https://translate.google.com/translate');
-    translateUrl.searchParams.set('sl', String(linkConfig.sourceLang || 'en').toLowerCase());
-    translateUrl.searchParams.set('tl', String(linkConfig.targetLang || 'ko').toLowerCase());
-    translateUrl.searchParams.set('hl', String(linkConfig.uiLang || linkConfig.targetLang || 'ko').toLowerCase());
-    translateUrl.searchParams.set('u', originalUrl);
-    return translateUrl.toString();
-  }
-
-  function buildDeepLTextUrl(item, linkConfig) {
-    const maxChars = safeNumber(linkConfig.maxDeepLTextChars) || 3500;
-    const text = collectTextForTranslation(item, maxChars);
-    if (!text) {
-      return '';
-    }
-
-    const sourceLang = String(linkConfig.sourceLang || 'en').toLowerCase();
-    const targetLang = String(linkConfig.targetLang || 'ko').toLowerCase();
-    return `https://www.deepl.com/translator#${sourceLang}/${targetLang}/${encodeURIComponent(text)}`;
-  }
-
-  function collectTextForTranslation(item, maxChars) {
-    const originalUrl = getOriginalArticleUrl(item);
-    const pieces = [
-      item?.title,
-      item?.description || item?.snippet,
-      originalUrl ? `Original URL: ${originalUrl}` : '',
-    ]
-      .map((part) => String(part || '').trim())
-      .filter(Boolean);
-
-    return pieces.join('\n\n').slice(0, maxChars);
-  }
-
   function openArticle(item) {
-    if (!runtimeConfig.clickOpensArticle || !hasArticleUrl(item)) {
-      return;
-    }
-
-    const url = resolveArticleUrl(item);
-    if (!url) {
-      return;
-    }
-
-    if (runtimeConfig.linkTarget === '_self') {
-      window.location.href = url;
-      return;
-    }
-
-    window.open(url, runtimeConfig.linkTarget || '_blank', 'noopener,noreferrer');
+    if (!runtimeConfig.clickOpensArticle) return;
+    window.NewsArticleReader.open(item);
   }
 
   function isInteractiveTarget(target) {

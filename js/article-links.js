@@ -39,18 +39,12 @@
     if(!ranked.length || (ranked[1] && ranked[0].score-ranked[1].score<0.12)) return null;
     return ranked[0];
   }
-  function searchUrl(item) {
-    const title=String(item.titleKo||'').replace(/[“”‘’'"…·,:!?]/g,' ');
-    const words=title.split(/\s+/).filter(x=>/[가-힣A-Za-z]/.test(x)&&!['주가','미국','美','뉴스'].includes(x));
-    const q=words.slice(0,3).join(' ') || (item.symbols||[]).slice(0,2).join(' ') || String(item.originalTitle||item.title||'').slice(0,100);
-    const url=new URL('https://kr.benzinga.com/');url.searchParams.set('s',q);return url.href;
-  }
   function resolve(item) {
     if(!isBenzinga(item?.url)) return null;
     if(parse(item.url).hostname===koreanHost) return {url:item.url,kind:'korean',title:'Benzinga 한국어 기사'};
     const match=findMatch(item);
     return match ? {url:match.url,kind:'korean',title:match.title,original:item.url}
-      : {url:item.url,kind:'original',title:'영문 원문 · 대응 한국어 기사 미확인',search:searchUrl(item)};
+      : {url:item.url,kind:'original',title:'영문 원문 · 대응 한국어 기사 미확인'};
   }
   function watch(onChange) {
     if(started) return;started=true;

@@ -11,6 +11,7 @@
     <script defer src="js/translation-quality.js"></script>
     <script defer src="js/market-impact.js"></script>
     <script defer src="js/article-links.js"></script>
+    <script defer src="js/article-reader.js"></script>
     <script defer src="js/news-source.js"></script>
     <script defer src="js/news-context.js"></script>
     <script defer src="js/feed-health.js"></script>
@@ -107,6 +108,30 @@
         </footer>
       </section>
     </main>
+    <dialog class="article-reader" id="article-reader" aria-labelledby="article-reader-title">
+      <div class="article-reader__header">
+        <span class="article-reader__eyebrow">한국어로 읽기</span>
+        <button class="settings-close" id="article-reader-close" type="button" aria-label="기사 닫기" autofocus>×</button>
+      </div>
+      <div class="article-reader__scroll">
+        <p class="article-reader__meta" id="article-reader-meta"></p>
+        <h2 id="article-reader-title"></h2>
+        <div class="article-reader__brief" id="article-reader-brief" aria-busy="false">
+          <p class="article-reader__kind" id="article-reader-kind">내용 준비 중</p>
+          <p class="article-reader__status" id="article-reader-status" role="status" aria-live="polite"></p>
+          <div class="article-reader__text" id="article-reader-text"></div>
+          <p class="article-reader__note" id="article-reader-note"></p>
+          <button class="toolbar-btn" id="article-reader-retry" type="button" hidden>다시 시도</button>
+        </div>
+      </div>
+      <footer class="article-reader__footer">
+        <div class="article-reader__links">
+          <a id="article-reader-original" target="_blank" rel="noopener noreferrer" hidden>원문 보기 ↗</a>
+          <a id="article-reader-korean" target="_blank" rel="noopener noreferrer" hidden>한국어판 보기 ↗</a>
+        </div>
+        <p id="article-reader-link-note" class="article-reader__note"></p>
+      </footer>
+    </dialog>
     <dialog class="settings-dialog" id="appearance-settings" aria-labelledby="settings-title" aria-describedby="settings-description">
       <div class="settings-header">
         <h2 id="settings-title">화면 설정</h2>

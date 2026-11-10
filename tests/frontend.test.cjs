@@ -23,6 +23,7 @@ async function boot(payload, query = '', runtime = {}, EventSource = undefined, 
   const c = { console, URL, URLSearchParams, AbortController, Date, Intl };
   c.document = {getElementById(id) { if (!nodes.has(id)) nodes.set(id, new Element()); return nodes.get(id); }, createElement() { return new Element(); }, addEventListener() {} };
   c.window = { NEWS_WIDGET_RUNTIME: {translationPolicy:JSON.parse(fs.readFileSync(path.join(root,'translation-policy.json'),'utf8')), ...runtime}, location: { search: query }, localStorage: {getItem:k=>store.get(k)||null, setItem:(k,v)=>store.set(k,v)}, setTimeout:()=>1, clearTimeout(){}, open(){} };
+  c.window.NewsArticleReader = {open(item) { c.readerItem = item; }, updateLinks() {}};
   c.window.EventSource = EventSource;
   c.fetch = async url => {
     if (url === '/api/benzinga-korean') return {ok:true,json:async()=>({items:koreanItems,status:'ok'})};
@@ -38,12 +39,15 @@ async function boot(payload, query = '', runtime = {}, EventSource = undefined, 
   return {c, nodes, app:c.window.audit, get requestedUrl(){ return requestedUrl; }, status:()=>nodes.get('status-text').textContent};
 }
 
-test('fresh data renders Korean cards and preserves existing translation links', async () => {
+test('fresh data renders Korean headline buttons that open the reader without external navigation', async () => {
   const b = await boot(fresh());
   assert.equal(b.status(), '정상 연결');
   const links = b.nodes.get('news-list').querySelectorAll('.news-card__title-link');
   assert.equal(links[0].textContent, '연준 금리 인하');
-  assert.match(links[0].href, /^https:\/\/translate.google.com/);
+  assert.equal(links[0].href, undefined);
+  assert.equal(links[0].attributes['aria-haspopup'], 'dialog');
+  links[0].events.click({preventDefault(){}, stopPropagation(){}});
+  assert.equal(b.c.readerItem.id, headline.id);
 });
 
 test('old JSON and missing timestamps never appear healthy', async () => {
@@ -383,13 +387,16 @@ const benzingaStory = {
 const koreanStory = {title:'짐 크레이머, 주가 13% 급등에 AMD는 승자···미국 데이터센터 로드맵에는 의문',
   url:'https://kr.benzinga.com/news/usa/stocks/test-korean-article/',publishedAt:'2026-11-10T06:59:00Z',symbols:['AMD']};
 
-test('Benzinga opens a matching Korean edition directly in widget and panel, retaining original access', async()=>{
+test('Benzinga opens the Korean reader in widget and panel, retaining matched edition metadata', async()=>{
   for(const view of ['widget','panel']) {
     const b=await boot({...fresh(),items:[benzingaStory]},`?view=${view}`,{},undefined,{},[koreanStory]);
     const link=b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0];
-    assert.equal(link.href,koreanStory.url);
+    assert.equal(link.href,undefined);
+    link.events.click({preventDefault(){},stopPropagation(){}});
+    assert.equal(b.c.readerItem.id,benzingaStory.id);
+    assert.equal(b.c.window.NewsArticleLinks.resolve(b.c.readerItem).url,koreanStory.url);
     assert.equal(b.c.window.NewsArticleLinks.resolve(b.app.state.items[0]).original,benzingaStory.url);
-    assert.ok(b.nodes.get('news-list').querySelectorAll('.news-card__links').length);
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__links').length,0);
   }
 });
 
@@ -402,16 +409,17 @@ test('unmatched, different-number, opposed, ambiguous and stale Korean candidate
     const b=await boot({...fresh(),items:[benzingaStory]},'',{},undefined,{},candidates);
     const resolved=b.c.window.NewsArticleLinks.resolve(b.app.state.items[0]);
     assert.equal(resolved.url,benzingaStory.url);
-    assert.equal(new URL(resolved.search).hostname,'kr.benzinga.com');
-    assert.ok(new URL(resolved.search).searchParams.get('s'));
-    assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].href,benzingaStory.url);
+    assert.equal(resolved.search,undefined);
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].href,undefined);
   }
 });
 
-test('existing Korean links bypass translation and old pinned Benzinga stories use current routing',async()=>{
+test('existing Korean and pinned Benzinga links open the reader with matching edition metadata',async()=>{
   const b=await boot({...fresh(),items:[{...benzingaStory,url:koreanStory.url}]});
-  assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].href,koreanStory.url);
+  assert.equal(b.c.window.NewsArticleLinks.resolve(b.app.state.items[0]).url,koreanStory.url);
   const saved={'news-overlay-widget.pins.v1.combined':JSON.stringify([{key:benzingaStory.id,pinnedAt:Date.now(),item:{...benzingaStory,originalTitle:benzingaStory.title,symbols:['AMD']}}])};
   const pinned=await boot({...fresh(),items:[]},'',{},undefined,saved,[koreanStory]);
-  assert.equal(pinned.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].href,koreanStory.url);
+  const button = pinned.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0];
+  button.events.click({preventDefault(){},stopPropagation(){}});
+  assert.equal(pinned.c.window.NewsArticleLinks.resolve(pinned.c.readerItem).url,koreanStory.url);
 });

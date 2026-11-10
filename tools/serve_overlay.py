@@ -12,12 +12,15 @@ from urllib.parse import parse_qs, unquote, urlsplit
 try:
     from .translation_quality import POLICY
     from .korean_links import KoreanArticleIndex
+    from .article_summary import ArticleSummaryService
 except ImportError:
     from translation_quality import POLICY
     from korean_links import KoreanArticleIndex
+    from article_summary import ArticleSummaryService
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ("index.html", "styles.css", "js/config.js", "js/appearance.js", "js/translation-quality.js", "js/market-impact.js", "js/article-links.js", "js/news-source.js", "js/news-context.js", "js/feed-health.js", "js/app.js")
+ASSETS += ("js/article-reader.js",)
 
 
 class WidgetHandler(SimpleHTTPRequestHandler):
@@ -31,6 +34,9 @@ class WidgetHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(self.root), **kwargs)
 
     def do_GET(self):
+        if urlsplit(self.path).path == '/api/article-summary':
+            job = parse_qs(urlsplit(self.path).query).get('job', [''])[0]
+            return self.send_json(self.server.article_summary.snapshot(job))
         if urlsplit(self.path).path != "/events":
             return super().do_GET()
         route = parse_qs(urlsplit(self.path).query).get("feed", ["/data/news.live.json"])[0]
@@ -62,6 +68,35 @@ class WidgetHandler(SimpleHTTPRequestHandler):
                 time.sleep(1)
         except (OSError, TimeoutError):
             pass
+
+    def send_json(self, payload, status=200):
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if urlsplit(self.path).path != '/api/article-summary':
+            return self.send_error(404, 'Not found')
+        # A JSON POST from this widget is required before any paid API work starts.
+        # Cross-site forms/GETs and arbitrary text/URLs cannot trigger translation.
+        origin = self.headers.get('Origin')
+        if (self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json' or
+                self.headers.get('Sec-Fetch-Site') == 'cross-site' or
+                (origin and urlsplit(origin).netloc != self.headers.get('Host'))):
+            return self.send_json({'status': 'error', 'message': '위젯에서 기사를 열어 주세요.'}, 403)
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 < size <= 4096:
+                raise ValueError()
+            payload = json.loads(self.rfile.read(size))
+            if not isinstance(payload, dict):
+                raise ValueError()
+        except (ValueError, OSError):
+            return self.send_json({'status': 'error', 'message': '기사 요청을 확인할 수 없습니다.'}, 400)
+        self.send_json(self.server.article_summary.start(payload.get('id'), payload.get('url', '')))
 
     def send_head(self):
         route = unquote(urlsplit(self.path).path)
@@ -109,12 +144,16 @@ class WidgetServer(ThreadingHTTPServer):
         super().server_close()
         if hasattr(self, 'korean_index'):
             self.korean_index.close()
+        if hasattr(self, 'article_summary'):
+            self.article_summary.close()
 
 
-def build_server(host: str, port: int, root: Path, feeds: dict[str, Path], runtime: dict) -> ThreadingHTTPServer:
+def build_server(host: str, port: int, root: Path, feeds: dict[str, Path], runtime: dict,
+                 summary_options: list[str] | None = None) -> ThreadingHTTPServer:
     handler = partial(WidgetHandler, root=root, feeds=feeds, runtime={**runtime, "translationPolicy": POLICY})
     server = WidgetServer((host, port), handler)
     server.korean_index = KoreanArticleIndex(root / 'data/.relay-cache/benzinga-korean-links.json')
+    server.article_summary = ArticleSummaryService(root / 'data/.relay-cache/article-summaries.ko.json', feeds, summary_options)
     return server
 
 
@@ -130,6 +169,10 @@ def main() -> int:
     parser.add_argument("--benzinga-out", default="data/news.benzinga.json")
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--no-tabs", action="store_true")
+    parser.add_argument("--translate-provider", choices=['none', 'deepl'], default='none')
+    parser.add_argument("--translate-source", default='en')
+    parser.add_argument("--translate-terms-file", default='tools/ko_terms.sample.json')
+    parser.add_argument("--massive-key-file", default='')
     args = parser.parse_args()
     feeds = {}
     for route, value in [("news.live.json", args.out), ("news.reuters.json", args.reuters_out), ("news.marketaux.json", args.marketaux_out),
@@ -141,7 +184,9 @@ def main() -> int:
             parser.error("피드 출력 경로는 .json 파일이어야 합니다")
         feeds["/data/" + route] = path.absolute()
     server = build_server(args.host, args.port, PROJECT_ROOT, feeds,
-                          {"maxItems": max(1, args.limit), "tabsEnabled": not args.no_tabs})
+                          {"maxItems": max(1, args.limit), "tabsEnabled": not args.no_tabs},
+                          ['--translate-provider', args.translate_provider, '--translate-source', args.translate_source,
+                           '--translate-terms-file', args.translate_terms_file, '--massive-key-file', args.massive_key_file])
     try:
         server.serve_forever()
     except KeyboardInterrupt:

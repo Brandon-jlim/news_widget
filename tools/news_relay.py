@@ -242,8 +242,8 @@ class DeepLTranslator(Translator):
             "https://api-free.deepl.com" if api_key.endswith(":fx") else "https://api.deepl.com"
         )
 
-    def translate_item(self, item: dict[str, Any], args: argparse.Namespace) -> TranslationResult:
-        title = clean_text(item.get("title"))
+    def translate_item(self, item: dict[str, Any], args: argparse.Namespace, *, preserve_paragraphs: bool = False) -> TranslationResult:
+        title = str(item.get("title") or '').strip() if preserve_paragraphs else clean_text(item.get("title"))
         if not title:
             return TranslationResult(text="", provider=self.provider_name, from_cache=True)
 
@@ -282,7 +282,8 @@ class DeepLTranslator(Translator):
         if not translations:
             raise RelayError("DeepL 응답에 translations 가 없습니다.")
 
-        translated = clean_text((translations[0] or {}).get("text"))
+        raw_text = (translations[0] or {}).get("text") or ''
+        translated = str(raw_text).strip() if preserve_paragraphs else clean_text(raw_text)
         if not translated:
             raise RelayError("DeepL 응답의 번역문이 비어 있습니다.")
 
@@ -2565,7 +2566,7 @@ def refresh_once(provider: Provider, args: argparse.Namespace) -> None:
     write_single_feed(result, candidate_items, filtered_items, args)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="marketaux/Reuters 뉴스를 오버레이용 JSON으로 정규화하고, 필요시 DeepL로 한국어 헤드라인을 생성합니다. API 키는 keys/*.txt 에서 자동으로 읽을 수 있습니다.")
 
     parser.add_argument("--provider", choices=["marketaux", "reuters", "massive", "combined"], default="combined")
@@ -2650,7 +2651,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--aws-region", default="", help=argparse.SUPPRESS)  # backward compatibility
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if min(args.marketaux_interval, args.massive_interval, args.reuters_interval, args.official_interval, args.rss_interval, args.official_lookback_hours, args.limit, args.timeout) <= 0 or args.watch < 0:
         parser.error("요청 간격과 --limit 은 양수여야 합니다")
     if not 1 <= args.massive_fetch_limit <= 1000:
