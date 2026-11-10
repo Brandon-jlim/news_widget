@@ -6,6 +6,8 @@ import argparse
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
+import socket
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -23,6 +25,16 @@ except ImportError:
 PROJECT_ROOT = RESOURCE_ROOT
 ASSETS = ("index.html", "styles.css", "js/config.js", "js/appearance.js", "js/market-ticker.js", "js/translation-quality.js", "js/market-impact.js", "js/article-links.js", "js/news-source.js", "js/news-context.js", "js/feed-health.js", "js/app.js")
 ASSETS += ("js/article-reader.js",)
+
+
+def regular_file(path: Path) -> bool:
+    # Windows 8.3 aliases can differ from resolve() without being symlinks.
+    # Inspect actual links/junctions instead of comparing their path spellings.
+    absolute = path.absolute()
+    return absolute.is_file() and not any(
+        part.is_symlink() or getattr(part, 'is_junction', lambda: False)()
+        for part in (absolute, *absolute.parents)
+    )
 
 
 class WidgetHandler(SimpleHTTPRequestHandler):
@@ -56,7 +68,7 @@ class WidgetHandler(SimpleHTTPRequestHandler):
         try:
             while True:
                 try:
-                    stat = target.stat() if target.resolve() == target.absolute() else None
+                    stat = target.stat() if regular_file(target) else None
                     version = (stat.st_mtime_ns, stat.st_size) if stat else None
                 except OSError:
                     version = None
@@ -120,7 +132,7 @@ class WidgetHandler(SimpleHTTPRequestHandler):
             return io.BytesIO(body)
         target = self.routes.get(route)
         # Exact routes only; reject symlinks even when they point inside the root.
-        if target is None or target.resolve() != target.absolute() or not target.is_file():
+        if target is None or not regular_file(target):
             self.send_error(404, "Not found")
             return None
         try:
@@ -142,6 +154,13 @@ class WidgetHandler(SimpleHTTPRequestHandler):
 
 
 class WidgetServer(ThreadingHTTPServer):
+    allow_reuse_address = os.name != 'nt'
+
+    def server_bind(self):
+        if os.name == 'nt':
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
     def server_close(self):
         super().server_close()
         if hasattr(self, 'korean_index'):

@@ -137,7 +137,7 @@ class MarketImpactTests(unittest.TestCase):
         self.assertEqual(attach_impact(item)['marketImpact']['direction'], 'unknown')
 
     def test_browser_examples_are_real_classifier_output(self):
-        for item in json.loads(Path(__file__).with_name('market_impact_examples.json').read_text()):
+        for item in json.loads(Path(__file__).with_name('market_impact_examples.json').read_text(encoding='utf-8')):
             self.assertEqual(assess_impact(item), item['marketImpact'])
 
 

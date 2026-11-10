@@ -246,11 +246,14 @@ def wait_for_exit(relay_proc: subprocess.Popen[bytes], server_proc: subprocess.P
 def check_server_port(host: str, port: int) -> bool:
     """Reject duplicate launches before they can start another paid API collector."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if os.name == 'nt':
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind((host, port))
         except OSError as exc:
-            if exc.errno != errno.EADDRINUSE:
+            if exc.errno != errno.EADDRINUSE and getattr(exc, 'winerror', None) not in {10013, 10048}:
                 raise
             print(f"[run_overlay] 포트 {port}가 이미 사용 중입니다. 추가 수집기는 시작하지 않았습니다.")
             print(f"[run_overlay] 기존 위젯 확인: http://{host}:{port}/?tab=benzinga")

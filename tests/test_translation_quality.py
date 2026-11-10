@@ -14,7 +14,7 @@ class TranslationQualityTests(unittest.TestCase):
     setUp = fixture.PipelineTests.setUp
 
     def test_mixed_script_cases_match_browser_policy(self):
-        cases = json.loads(Path(__file__).with_name('translation_quality_cases.json').read_text())
+        cases = json.loads(Path(__file__).with_name('translation_quality_cases.json').read_text(encoding='utf-8'))
         for case in cases:
             with self.subTest(text=case['text']):
                 text, issue = inspect_translation(case['source'], case['text'])
