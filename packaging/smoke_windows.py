@@ -19,14 +19,21 @@ def free_port():
         return server.getsockname()[1]
 
 
+def print_logs(root):
+    for path in sorted((root / 'logs').glob('*.log')):
+        print(path.name + ':\n' + path.read_text(encoding='utf-8', errors='replace')[-6000:])
+
+
 def wait_report(path, proc):
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         if path.exists():
             return json.loads(path.read_text(encoding='utf-8'))
         if proc.poll() is not None:
+            print_logs(path.parent)
             raise AssertionError('EXE exited before reporting readiness: ' + str(proc.returncode))
         time.sleep(.2)
+    print_logs(path.parent)
     raise AssertionError('EXE startup timed out')
 
 
@@ -56,14 +63,24 @@ def main():
             (target / 'keys' / name).write_text('fixture-not-a-real-key\n', encoding='utf-8-sig')
         env = os.environ.copy()
         # A recipient does not have Python installed or a development PATH.
-        env['PATH'] = os.pathsep.join([env['SystemRoot'], str(Path(env['SystemRoot']) / 'System32')])
+        system_root = os.environ.get('SystemRoot', r'C:\Windows')
+        env['PATH'] = os.pathsep.join([system_root, str(Path(system_root) / 'System32')])
         for key in list(env):
             if key.startswith(('PYTHON', 'PYINSTALLER')) or key in ['GH_TOKEN', 'GITHUB_TOKEN']:
                 env.pop(key, None)
         executable = str(target / 'MarketBrief.exe')
         report = target / 'test-result.json'
         proc = subprocess.Popen([executable, '--self-test', str(report), '--port', str(free_port())], cwd=directory, env=env)
-        assert proc.wait(timeout=60) == 0
+        try:
+            exit_code = proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=10)
+            print_logs(target)
+            raise
+        if exit_code:
+            print_logs(target)
+        assert exit_code == 0
         result = json.loads(report.read_text(encoding='utf-8'))
         assert result['status'] == 'ready' and result['frozen'] and result['stopped']
         assert '한글 경로' in result['dataRoot']
