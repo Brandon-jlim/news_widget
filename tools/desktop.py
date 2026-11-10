@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import atexit
 import ctypes
+from datetime import datetime, timezone
+from email.utils import format_datetime
 import json
 import os
 from pathlib import Path
@@ -122,6 +124,14 @@ class DesktopSession:
         ] + (['--no-massive', '--no-benzinga', '--no-official-feeds', '--no-public-rss', '--translate-provider', 'none'] if self.offline else []))
         for attr in ['out', 'marketaux_out', 'reuters_out', 'official_out', 'rss_out', 'benzinga_out', 'translate_cache', 'state_dir']:
             setattr(args, attr, str(self.root / getattr(args, attr)))
+        if self.offline:
+            # Keep the actual collector pipeline enabled, with a local XML source only.
+            fixture = self.root / 'data/.self-test.xml'
+            fixture.write_text('<rss><channel><item><title>Offline test: Federal Reserve cuts interest rates by 25 basis points</title>'
+                               '<link>https://www.reuters.com/world/us/market-brief-offline-test/</link>'
+                               '<pubDate>' + format_datetime(datetime.now(timezone.utc)) + '</pubDate></item></channel></rss>', encoding='utf-8')
+            args.reuters_feed = [str(fixture)]
+            args.min_overlay_score = 0
         return args
 
     def _spawn(self, role, cmd):
@@ -189,10 +199,18 @@ def self_test(report: Path, port: int, stay_open: bool) -> int:
             except HTTPError as exc:
                 assert exc.code == 404
         deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and not (DATA_ROOT / 'data/news.live.json').exists():
+        payload = {}
+        while time.monotonic() < deadline:
+            if session.relay.poll() is not None:
+                raise AssertionError('Offline collector exited')
+            feed = DATA_ROOT / 'data/news.live.json'
+            if feed.exists():
+                payload = json.loads(feed.read_text(encoding='utf-8'))
+                if payload.get('items'):
+                    break
             time.sleep(.1)
-        payload = json.loads((DATA_ROOT / 'data/news.live.json').read_text(encoding='utf-8'))
-        assert payload['items'] == []
+        assert len(payload.get('items', [])) == 1
+        assert payload['items'][0]['title'].startswith('Offline test: Federal Reserve')
         result = {'status': 'ready', 'frozen': bool(getattr(sys, 'frozen', False)),
                   'version': (RESOURCE_ROOT / 'VERSION').read_text().strip(),
                   'pid': os.getpid(), 'serverPid': session.server.pid, 'relayPid': session.relay.pid,
