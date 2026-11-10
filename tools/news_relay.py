@@ -518,7 +518,8 @@ class MassiveNewsProvider(Provider):
         }, args)
         item.update(_source_provider="benzinga", via="Massive",
                     updatedAt=parse_datetime_text(article.get("last_updated")) or published,
-                    channels=[clean_text(x) for x in (article.get("channels") or []) if isinstance(x, str)])
+                    channels=normalize_news_labels(article.get("channels")),
+                    tags=normalize_news_labels(article.get("tags")))
         return item
 
 
@@ -967,6 +968,8 @@ class BenzingaStreamProvider(Provider):
             if previous.get("updatedAt") and parse_iso_datetime(updated) < parse_iso_datetime(previous["updatedAt"]):
                 return
             normalized.update(_source_provider="benzinga", updatedAt=updated,
+                              channels=normalize_news_labels(article.get("channels")),
+                              tags=normalize_news_labels(article.get("tags")),
                               firstSeenAt=previous.get("firstSeenAt") or now_iso())
             self.items[identity] = normalized
             if len(self.items) > 500:
@@ -1315,6 +1318,14 @@ def resolve_path(path_text: str | Path) -> Path:
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     return path
+
+
+def normalize_news_labels(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    labels = [clean_text(item.get("name", "") if isinstance(item, dict) else item)
+              for item in value if isinstance(item, (str, dict))]
+    return list(dict.fromkeys(label for label in labels if label))
 
 
 def extract_secret_from_text(text: str) -> str:

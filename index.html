@@ -8,6 +8,7 @@
     <script defer src="js/config.js"></script>
     <script defer src="widget-runtime.js"></script>
     <script defer src="js/news-source.js"></script>
+    <script defer src="js/news-context.js"></script>
     <script defer src="js/feed-health.js"></script>
     <script defer src="js/app.js"></script>
   </head>
@@ -24,7 +25,7 @@
         <header class="widget-header">
           <div class="widget-header__main">
             <h1 class="widget-title" id="widget-title">미국 증시 뉴스</h1>
-            <p class="widget-subtitle">시장의 흐름을 한눈에 <span>· KST</span></p>
+            <p class="widget-subtitle">시장의 흐름을 한눈에</p>
           </div>
 
           <div class="widget-actions">
@@ -34,6 +35,17 @@
             </div>
           </div>
         </header>
+
+        <div class="world-clocks" aria-label="현재 한국 및 미국 동부 시각">
+          <div class="clock-cell">
+            <div class="clock-label"><span>한국 <b>KST</b></span><span id="clock-korea-date">--.--</span></div>
+            <time class="clock-time" id="clock-korea">--:--:--</time>
+          </div>
+          <div class="clock-cell">
+            <div class="clock-label"><span>뉴욕 <b id="clock-us-zone">ET</b></span><span id="clock-us-date">--.--</span></div>
+            <time class="clock-time" id="clock-us">--:--:--</time>
+          </div>
+        </div>
 
         <nav class="feed-tabs" id="feed-tabs" role="tablist" aria-label="뉴스 소스 선택" hidden></nav>
 
@@ -45,6 +57,19 @@
         <div class="list-heading">
           <span id="list-count">최신 뉴스</span>
           <div class="widget-action-row">
+            <select class="type-filter" id="news-type" aria-label="뉴스 유형 필터">
+              <option value="all">모든 유형</option>
+              <option value="breaking">속보</option>
+              <option value="important">주요 기사</option>
+              <option value="economic">경제지표</option>
+              <option value="earnings">실적·전망</option>
+              <option value="analyst">투자의견</option>
+              <option value="official">공식 발표</option>
+              <option value="release">보도자료</option>
+              <option value="analysis">분석·의견</option>
+              <option value="recap">기보도</option>
+              <option value="general">일반 뉴스</option>
+            </select>
             <button class="text-btn" id="edit-toggle" type="button" aria-pressed="false">핀 관리</button>
             <button class="text-btn text-btn--muted" id="clear-pins" type="button" hidden>모두 해제</button>
           </div>

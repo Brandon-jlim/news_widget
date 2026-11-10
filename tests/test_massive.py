@@ -121,6 +121,18 @@ class MassiveTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--massive-interval") + 1], "15")
         self.assertIn("--no-marketaux", cmd)
 
+    def test_provider_channels_and_tags_survive_normalization_and_public_feed(self):
+        source = self.source()
+        article = self.article(channels=["News", {"name": "Earnings"}, None], tags=["Breaking News", "Breaking News", 3])
+        with patch.object(relay, "request_json", return_value=self.response([article])):
+            result = source.fetch(self.args)
+        self.assertEqual(result.items[0]["channels"], ["News", "Earnings"])
+        self.assertEqual(result.items[0]["tags"], ["Breaking News"])
+        relay.write_tab_feeds(result, result.items, self.args)
+        published = storage.read_json(Path(self.args.benzinga_out))
+        self.assertEqual(published["items"][0]["tags"], ["Breaking News"])
+        self.assertEqual(relay.normalize_news_labels("Breaking News"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

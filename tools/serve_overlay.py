@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ("index.html", "styles.css", "js/config.js", "js/news-source.js", "js/feed-health.js", "js/app.js")
+ASSETS = ("index.html", "styles.css", "js/config.js", "js/news-source.js", "js/news-context.js", "js/feed-health.js", "js/app.js")
 
 
 class WidgetHandler(SimpleHTTPRequestHandler):

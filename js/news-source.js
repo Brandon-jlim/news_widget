@@ -61,11 +61,11 @@
   function normalizeNewsItem(rawItem, fallbackSourceLabel) {
     const titleKo = normalizeText(rawItem.titleKo || rawItem.title_ko || rawItem.headlineKo);
     const title = normalizeText(rawItem.title || rawItem.headline || rawItem.name);
-    const publishedDate = parseDate(
-      rawItem.publishedAt || rawItem.published_at || rawItem.pubDate || rawItem.time || rawItem.datetime || rawItem.updatedAt,
-    );
+    const rawPublished = rawItem.publishedAt || rawItem.published_at || rawItem.pubDate || rawItem.time || rawItem.datetime;
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(String(rawPublished || ''));
+    const publishedDate = dateOnly ? null : parseDate(rawPublished);
     const publishedDateOnly = toIsoDateOnly(
-      rawItem.publishedDate || rawItem.published_date || rawItem.datePublished || rawItem.date || rawItem.displayDate,
+      rawItem.publishedDate || rawItem.published_date || rawItem.datePublished || rawItem.date || rawItem.displayDate || (dateOnly ? rawPublished : ''),
     ) || (publishedDate ? publishedDate.toISOString().slice(0, 10) : '');
 
     return {
@@ -77,6 +77,9 @@
       official: Boolean(rawItem.official),
       contentKind: normalizeText(rawItem.contentKind || ''),
       firstSeenAt: normalizeText(rawItem.firstSeenAt || ''),
+      channels: Array.isArray(rawItem.channels) ? rawItem.channels.filter(x => typeof x === 'string') : [],
+      tags: Array.isArray(rawItem.tags) ? rawItem.tags.filter(x => typeof x === 'string') : [],
+      updatedAt: parseDate(rawItem.updatedAt)?.toISOString() || null,
       symbols: (Array.isArray(rawItem.entities) ? rawItem.entities : []).map(entity => normalizeText(entity?.symbol)).filter(Boolean),
       publishedAt: publishedDate ? publishedDate.toISOString() : null,
       publishedDate: publishedDateOnly || '',

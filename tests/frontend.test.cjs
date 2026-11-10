@@ -25,7 +25,7 @@ async function boot(payload, query = '', runtime = {}, EventSource = undefined, 
   c.window.EventSource = EventSource;
   c.fetch = async url => { requestedUrl = url; return {ok:true,json:async()=>payload}; };
   vm.createContext(c);
-  for (const filename of ['config.js', 'news-source.js', 'feed-health.js', 'app.js']) {
+  for (const filename of ['config.js', 'news-source.js', 'news-context.js', 'feed-health.js', 'app.js']) {
     let code = fs.readFileSync(path.join(root, 'js', filename), 'utf8');
     if (filename === 'app.js') code = code.replace(/\}\)\(\);\s*$/, 'window.audit = {state, runtimeConfig, refreshNews, switchFeedTab, togglePin};\n})();');
     vm.runInContext(code, c, {filename});
@@ -242,4 +242,68 @@ test('scrolling holds the list, changing tabs releases it and text size persists
   b.nodes.get('font-toggle').events.click();
   assert.equal(b.nodes.get('news-widget').dataset.largeText,'true');
   assert.equal(b.c.window.localStorage.getItem('news-overlay-widget.reader.largeText'),'true');
+});
+
+test('Korea and New York clocks handle dates, midnight and both DST transitions', async () => {
+  const b=await boot(fresh());
+  const clocks=b.c.window.NewsContext.clocks;
+  for(const [utc,expected,zone] of [
+    ['2026-03-08T06:59:59Z','01:59:59','EST'],
+    ['2026-03-08T07:00:00Z','03:00:00','EDT'],
+    ['2026-11-01T05:59:59Z','01:59:59','EDT'],
+    ['2026-11-01T06:00:00Z','01:00:00','EST']]) {
+    assert.equal(clocks(utc).newYork.time,expected);
+    assert.equal(clocks(utc).newYork.timeZoneName,zone);
+  }
+  assert.equal(clocks('2026-01-01T02:03:04Z').korea.date,'01.01');
+  assert.equal(clocks('2026-01-01T02:03:04Z').newYork.date,'12.31');
+  assert.equal(clocks('2026-11-10T15:00:00Z').korea.time,'00:00:00');
+  assert.match(b.nodes.get('clock-korea').textContent,/^\d{2}:\d{2}:\d{2}$/);
+});
+
+test('publication times stay distinct from updates, date-only and absent timestamps', async () => {
+  const b=await boot(fresh());
+  const normalize=b.c.window.NewsSourceFactory.normalizePayload;
+  const publication=b.c.window.NewsContext.publication;
+  const [exact,dayOnly,unknown]=normalize({items:[
+    {title:'A',publishedAt:'2026-01-01T02:03:04Z',updatedAt:'2026-01-02T02:03:04Z'},
+    {title:'B',publishedAt:'2026-01-01'},
+    {title:'C',updatedAt:'2026-01-02T02:03:04Z'}
+  ]}).items;
+  assert.match(publication(exact).text,/01\.01 11:03 KST · 12\.31 21:03 EST/);
+  assert.equal(dayOnly.publishedAt,null);
+  assert.match(publication(dayOnly).text,/2026-01-01 · 시각 미제공/);
+  assert.equal(unknown.publishedAt,null);
+  assert.equal(publication(unknown).text,'발행 시각 미제공');
+});
+
+test('breaking labels require explicit publisher markers and are independent of recency', async () => {
+  const b=await boot(fresh());
+  const classify=b.c.window.NewsContext.classify;
+  assert.equal(classify({...headline,channels:['news'],publishedAt:new Date().toISOString()}).kind,'general');
+  assert.equal(classify({...headline,channels:['top stories']}).kind,'important');
+  assert.equal(classify({...headline,tags:['Breaking News']}).kind,'breaking');
+  assert.equal(classify({...headline,title:'Breaking: Fed statement'}).kind,'breaking');
+  assert.equal(classify({...headline,title:'URGENT: Fed statement'}).kind,'breaking');
+  assert.equal(classify({...headline,title:'Record breaking quarterly sales'}).kind,'general');
+  assert.equal(classify({...headline,title:'Reported Earlier, CPI released',tags:['breaking']}).kind,'recap');
+  assert.equal(classify({...headline,channels:['earnings']}).kind,'earnings');
+  assert.equal(classify({...headline,channels:['macro economic events']}).kind,'economic');
+});
+
+test('type filtering and pinned snapshots preserve editorial classifications', async () => {
+  const payload={...fresh(),items:[{...headline,tags:['breaking']},{...headline,id:'2',channels:['earnings']}]};
+  const b=await boot(payload);
+  b.app.togglePin(b.app.state.items.find(x=>x.id==='1'));
+  b.nodes.get('news-type').value='breaking';
+  b.nodes.get('news-type').events.change();
+  assert.equal(b.nodes.get('news-list').children.length,1);
+  assert.equal(b.nodes.get('news-list').children[0].dataset.newsType,'breaking');
+  payload.items=[];
+  await b.app.refreshNews();
+  assert.equal(b.nodes.get('news-list').children[0].dataset.newsType,'breaking');
+  assert.match(b.nodes.get('news-list').querySelectorAll('.news-card__publication')[0].textContent,/KST/);
+  b.nodes.get('news-type').value='economic';
+  b.nodes.get('news-type').events.change();
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title')[0].textContent,'검색 결과가 없습니다');
 });

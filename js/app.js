@@ -14,6 +14,12 @@
   const countEl = document.getElementById('list-count');
   const viewWidgetEl = document.getElementById('view-widget');
   const viewPanelEl = document.getElementById('view-panel');
+  const typeFilterEl = document.getElementById('news-type');
+  const clockKoreaEl = document.getElementById('clock-korea');
+  const clockUsEl = document.getElementById('clock-us');
+  const clockKoreaDateEl = document.getElementById('clock-korea-date');
+  const clockUsDateEl = document.getElementById('clock-us-date');
+  const clockUsZoneEl = document.getElementById('clock-us-zone');
 
   const defaultConfig = window.NEWS_WIDGET_CONFIG || {};
   const runtimeConfig = resolveRuntimeConfig(defaultConfig);
@@ -33,6 +39,7 @@
     currentAbortController: null,
     timerId: null,
     clockTimerId: null,
+    wallClockTimerId: null,
     events: null,
     renderKey: null,
     activeTabKey: runtimeConfig.activeTabKey,
@@ -41,6 +48,7 @@
     view: runtimeConfig.view,
     largeText: readPreference('largeText') === 'true',
     search: '',
+    typeFilter: 'all',
     heldItems: null,
   };
 
@@ -54,9 +62,11 @@
     refreshNews();
     connectEvents();
     scheduleClockRefresh();
+    updateWallClocks();
 
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
+        updateWallClocks();
         scheduleRefresh(500);
       }
     });
@@ -76,6 +86,11 @@
   }
 
   function setupToolbar() {
+    typeFilterEl?.addEventListener('change', () => {
+      state.typeFilter = typeFilterEl.value;
+      newsListEl.scrollTop = 0;
+      render();
+    });
     searchEl?.addEventListener('input', () => {
       state.search = searchEl.value.trim().toLowerCase();
       newsListEl.scrollTop = 0;
@@ -255,6 +270,24 @@
     }, nextMinuteMs);
   }
 
+  function updateWallClocks() {
+    if (state.wallClockTimerId) window.clearTimeout(state.wallClockTimerId);
+    const now = new Date();
+    const {korea, newYork} = window.NewsContext.clocks(now);
+    if (clockKoreaEl) {
+      clockKoreaEl.textContent = korea.time;
+      clockKoreaEl.setAttribute('datetime', now.toISOString());
+    }
+    if (clockUsEl) {
+      clockUsEl.textContent = newYork.time;
+      clockUsEl.setAttribute('datetime', now.toISOString());
+    }
+    if (clockKoreaDateEl) clockKoreaDateEl.textContent = korea.date;
+    if (clockUsDateEl) clockUsDateEl.textContent = newYork.date;
+    if (clockUsZoneEl) clockUsZoneEl.textContent = newYork.timeZoneName;
+    state.wallClockTimerId = window.setTimeout(updateWallClocks, 1000 - (Date.now() % 1000) + 10);
+  }
+
   async function refreshNews() {
     if (state.requestInFlight) {
       return;
@@ -341,7 +374,7 @@
     updateTabs();
     updateToolbar();
 
-    const renderKey = JSON.stringify([displayItems, status.kind, state.editMode, state.search, Math.floor(Date.now() / 60_000)]);
+    const renderKey = JSON.stringify([displayItems, status.kind, state.editMode, state.search, state.typeFilter, Math.floor(Date.now() / 60_000)]);
     if (renderKey === state.renderKey && displayItems.length > 0) return;
     if (!state.loading || displayItems.length > 0) state.renderKey = renderKey;
 
@@ -378,7 +411,7 @@
     }
     viewWidgetEl?.setAttribute('aria-pressed', String(state.view === 'widget'));
     viewPanelEl?.setAttribute('aria-pressed', String(state.view === 'panel'));
-    if (countEl) countEl.textContent = `${state.search ? '검색 결과' : paused ? '읽는 중' : '최신순'} · ${getDisplayItems().length}개`;
+    if (countEl) countEl.textContent = `${state.search || state.typeFilter !== 'all' ? '검색 결과' : paused ? '읽는 중' : '최신순'} · ${getDisplayItems().length}개`;
     if (editToggleEl) {
       editToggleEl.setAttribute('aria-pressed', String(state.editMode));
       editToggleEl.textContent = state.editMode ? '완료' : '핀 관리';
@@ -462,6 +495,8 @@
         .join(' ');
       card.dataset.clickable = String(Boolean(hasUrl && !state.editMode && runtimeConfig.clickOpensArticle));
       card.dataset.key = getItemKey(item);
+      const newsType = window.NewsContext.classify(item);
+      card.dataset.newsType = newsType.kind;
       card.setAttribute('title', resolveDisplayTitle(item));
 
       if (pinningEnabled) {
@@ -488,6 +523,9 @@
       meta.className = 'news-card__meta';
       const sentiment = resolveSentiment(item);
       if (item.source) meta.appendChild(makeChip(item.source, 'meta-chip--source'));
+      const typeChip = makeChip(newsType.label, `meta-chip--type meta-chip--${newsType.kind}`);
+      typeChip.title = newsType.basis;
+      meta.appendChild(typeChip);
       const age = item.publishedAt ? Date.now() - new Date(item.publishedAt).getTime() : Infinity;
       if (age >= 0 && age < 300_000) meta.appendChild(makeChip('최근 5분', 'meta-chip--fresh'));
       if (runtimeConfig.sentiment?.enabled !== false && sentiment !== 'neutral') {
@@ -510,8 +548,6 @@
       }
       if (item.translationStatus === 'failed') meta.appendChild(makeChip('원문'));
       if (item.translationStatus === 'pending') meta.appendChild(makeChip('번역 중'));
-      if (item.official) meta.appendChild(makeChip('공식 발표'));
-      if (item.contentKind === 'press_release') meta.appendChild(makeChip('기업 보도자료'));
 
       const titleText = resolveDisplayTitle(item);
       let titleNode;
@@ -560,6 +596,12 @@
 
       card.appendChild(meta);
       card.appendChild(titleNode);
+      const publication = window.NewsContext.publication(item);
+      const publicationEl = document.createElement('p');
+      publicationEl.className = 'news-card__publication';
+      publicationEl.textContent = publication.text;
+      publicationEl.title = publication.detail;
+      card.appendChild(publicationEl);
       newsListEl.appendChild(card);
     });
     if (state.heldItems) newsListEl.scrollTop = scrollPosition;
@@ -578,11 +620,12 @@
 
     const title = document.createElement('h2');
     title.className = 'news-card__title';
-    title.textContent = state.search ? '검색 결과가 없습니다' : state.lastError ? '뉴스 피드를 불러오지 못했습니다' : runtimeConfig.emptyTitle;
+    const filtered = state.search || state.typeFilter !== 'all';
+    title.textContent = filtered ? '검색 결과가 없습니다' : state.lastError ? '뉴스 피드를 불러오지 못했습니다' : runtimeConfig.emptyTitle;
 
     const desc = document.createElement('p');
     desc.className = 'news-card__desc';
-    desc.textContent = state.search ? '다른 키워드를 입력하거나 검색어를 지워 주세요.' : state.lastError || runtimeConfig.emptyMessage;
+    desc.textContent = filtered ? (state.typeFilter === 'breaking' ? '현재 피드에 명시적인 속보 표식이 있는 기사가 없습니다. 모든 유형에서 최신 뉴스를 확인하세요.' : '다른 키워드나 유형을 선택해 주세요.') : state.lastError || runtimeConfig.emptyMessage;
 
     card.appendChild(title);
     card.appendChild(desc);
@@ -739,7 +782,8 @@
     const hour = 60 * minute;
     const day = 24 * hour;
 
-    if (diffMs > -5 * minute && diffMs < minute) {
+    if (diffMs < 0) return '발행 시각 확인';
+    if (diffMs < minute) {
       return '방금 전';
     }
 
@@ -858,9 +902,10 @@
     const pinnedKeySet = new Set(pinnedItems.map((item) => item.__pinKey || getItemKey(item)));
     const remainingItems = liveItems.filter((item) => !pinnedKeySet.has(getItemKey(item)));
 
-    const matched = [...pinnedItems, ...remainingItems].filter(item => !state.search ||
-      [item.title, item.titleKo, item.originalTitle, item.source, item.category, ...(item.symbols || [])]
-        .join(' ').toLowerCase().includes(state.search));
+    const matched = [...pinnedItems, ...remainingItems].filter(item =>
+      (state.typeFilter === 'all' || window.NewsContext.classify(item).kind === state.typeFilter) &&
+      (!state.search || [item.title, item.titleKo, item.originalTitle, item.source, item.category, ...(item.symbols || [])]
+        .join(' ').toLowerCase().includes(state.search)));
     const limit = runtimeConfig.explicitLimit || (state.view === 'widget' ? Math.min(5, runtimeConfig.maxItems) : runtimeConfig.maxItems);
     return matched.slice(0, limit);
   }
@@ -950,6 +995,9 @@
       titleKo: String(base.titleKo || '').trim(),
       originalTitle: String(base.originalTitle || '').trim(),
       symbols: Array.isArray(base.symbols) ? base.symbols.map(String) : [],
+      channels: Array.isArray(base.channels) ? base.channels.filter(x => typeof x === 'string') : [],
+      tags: Array.isArray(base.tags) ? base.tags.filter(x => typeof x === 'string') : [],
+      updatedAt: String(base.updatedAt || '').trim(),
       translationStatus: String(base.translationStatus || '').trim(),
       official: Boolean(base.official),
       contentKind: String(base.contentKind || '').trim(),
