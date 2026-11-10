@@ -27,10 +27,12 @@ try:
     from .storage import atomic_write_json, read_json
     from .feed_sources import OFFICIAL_FEEDS, PUBLIC_RSS_FEEDS
     from .translation_quality import inspect_translation, review_record
+    from .market_impact import attach_impact, assess_impact
 except ImportError:
     from storage import atomic_write_json, read_json
     from feed_sources import OFFICIAL_FEEDS, PUBLIC_RSS_FEEDS
     from translation_quality import inspect_translation, review_record
+    from market_impact import attach_impact, assess_impact
 
 
 # Keep an application identifier, but use a browser-compatible User-Agent shape.
@@ -160,23 +162,6 @@ MARKET_SIGNAL_TERMS = tuple(
         }
     )
 )
-
-SENTIMENT_POSITIVE_TERMS = (
-    "rally", "rallies", "gain", "gains", "advance", "advances", "rebound", "rebounds", "rise", "rises",
-    "record high", "record highs", "optimism", "optimistic", "boost", "beats", "beat", "ceasefire",
-    "peace hopes", "progress", "rate cuts", "cooling inflation", "easing", "soft landing", "stimulus",
-)
-
-SENTIMENT_NEGATIVE_TERMS = (
-    "selloff", "falls", "fall", "slump", "slumps", "drop", "drops", "decline", "declines", "crash",
-    "concern", "concerns", "worry", "worries", "fear", "fears", "hawkish", "hot inflation",
-    "sticky inflation", "war", "tariff", "tariffs", "sanction", "sanctions", "volatility", "uncertainty",
-    "recession", "teeter", "tension", "tensions",
-)
-
-SENTIMENT_UP_WORDS = ("rise", "rises", "rose", "up", "jump", "jumps", "surge", "surges", "spike", "spikes")
-SENTIMENT_DOWN_WORDS = ("fall", "falls", "fell", "down", "drop", "drops", "slip", "slips", "easing", "ease", "eases", "cool", "cools", "cooling")
-
 
 class RelayError(RuntimeError):
     pass
@@ -1777,44 +1762,9 @@ def score_article(article: dict[str, Any]) -> float:
 
 
 def classify_market_sentiment(title: str, snippet: str, entities: list[dict[str, Any]]) -> str:
-    text = f"{clean_text(title)} {clean_text(snippet)}".lower()
-    entity_names = " ".join(clean_text((entity or {}).get("name")) for entity in (entities or []))
-    if entity_names:
-        text = f"{text} {entity_names.lower()}"
+    impact = assess_impact({"title": title, "snippet": snippet, "entities": entities})
+    return impact["direction"] if impact["direction"] in {"positive", "negative"} else "neutral"
 
-    score = 0
-    for term in SENTIMENT_POSITIVE_TERMS:
-        if term in text:
-            score += 1
-    for term in SENTIMENT_NEGATIVE_TERMS:
-        if term in text:
-            score -= 1
-
-    yield_context = any(term in text for term in ("yield", "yields", "treasury", "bond"))
-    oil_context = any(term in text for term in ("oil", "crude", "wti", "brent", "opec"))
-    inflation_context = any(term in text for term in ("inflation", "cpi", "pce", "ppi"))
-
-    if yield_context:
-        if any(term in text for term in SENTIMENT_DOWN_WORDS):
-            score += 2
-        if any(term in text for term in SENTIMENT_UP_WORDS):
-            score -= 2
-    if oil_context:
-        if any(term in text for term in SENTIMENT_DOWN_WORDS):
-            score += 2
-        if any(term in text for term in SENTIMENT_UP_WORDS):
-            score -= 2
-    if inflation_context:
-        if any(term in text for term in ("cool", "cooling", "ease", "easing", "soft", "slower", "slowdown")):
-            score += 2
-        if any(term in text for term in ("hot", "sticky", "surge", "reaccelerat", "faster", "higher")):
-            score -= 2
-
-    if score >= 2:
-        return "positive"
-    if score <= -2:
-        return "negative"
-    return "neutral"
 
 def categorize_article(title: str, snippet: str, entities: list[dict[str, Any]]) -> str:
     text = f"{clean_text(title)} {clean_text(snippet)}".lower()
@@ -2342,7 +2292,7 @@ def write_payload(out_path: Path, items: list[dict[str, Any]], meta: dict[str, A
             item = dict(item, titleKo=text)
             if issue:
                 item.update(translationStatus="review", translationIssue=issue)
-        checked_items.append(item)
+        checked_items.append(attach_impact(item))
     items = checked_items
     meta["translation_review_count"] = sum(item.get("translationStatus") == "review" for item in items)
     meta["translation_failed_count"] = sum(item.get("translationStatus") == "failed" for item in items)

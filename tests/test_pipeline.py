@@ -131,7 +131,8 @@ class PipelineTests(unittest.TestCase):
             "reuters": {"status": "error", "error": "HTTP 401"}}})
         relay.write_tab_feeds(result, result.items, self.args)
         saved = storage.read_json(Path(self.args.reuters_out))
-        self.assertEqual(saved["items"], old["items"])
+        self.assertEqual([{k:v for k,v in item.items() if k not in {"marketImpact", "sentiment"}}
+                          for item in saved["items"]], old["items"])
         self.assertEqual(saved["updatedAt"], old["updatedAt"])
         self.assertTrue(saved["meta"]["retained"])
         market = storage.read_json(Path(self.args.marketaux_out))

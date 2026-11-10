@@ -1,0 +1,127 @@
+[
+  {
+    "id": "0",
+    "title": "Acme EPS Beats Estimates",
+    "entities": [
+      {
+        "symbol": "ACME"
+      }
+    ],
+    "marketImpact": {
+      "version": 1,
+      "method": "event_rules",
+      "basisTitle": "Acme EPS Beats Estimates",
+      "direction": "positive",
+      "scope": "company",
+      "targets": [
+        "ACME"
+      ],
+      "reason": "EPS 예상 상회 → 수익 기대 개선 가능",
+      "evidence": [
+        {
+          "rule": "earnings_above",
+          "direction": "positive",
+          "scope": "company",
+          "reason": "EPS 예상 상회 → 수익 기대 개선 가능",
+          "quote": "EPS Beats Estimates"
+        }
+      ],
+      "caveat": "기사에 근거한 단기 영향 추정 · 선반영·실제 가격 반응 미확인"
+    }
+  },
+  {
+    "id": "1",
+    "title": "Acme EPS Misses Estimates",
+    "entities": [
+      {
+        "symbol": "ACME"
+      }
+    ],
+    "marketImpact": {
+      "version": 1,
+      "method": "event_rules",
+      "basisTitle": "Acme EPS Misses Estimates",
+      "direction": "negative",
+      "scope": "company",
+      "targets": [
+        "ACME"
+      ],
+      "reason": "EPS 예상 하회 → 수익 기대 부담 가능",
+      "evidence": [
+        {
+          "rule": "earnings_below",
+          "direction": "negative",
+          "scope": "company",
+          "reason": "EPS 예상 하회 → 수익 기대 부담 가능",
+          "quote": "EPS Misses Estimates"
+        }
+      ],
+      "caveat": "기사에 근거한 단기 영향 추정 · 선반영·실제 가격 반응 미확인"
+    }
+  },
+  {
+    "id": "2",
+    "title": "Acme EPS Beats Estimates But Cuts FY2027 Revenue Guidance",
+    "entities": [
+      {
+        "symbol": "ACME"
+      }
+    ],
+    "marketImpact": {
+      "version": 1,
+      "method": "event_rules",
+      "basisTitle": "Acme EPS Beats Estimates But Cuts FY2027 Revenue Guidance",
+      "direction": "mixed",
+      "scope": "company",
+      "targets": [
+        "ACME"
+      ],
+      "reason": "EPS 예상 상회 → 수익 기대 개선 가능 / 실적 전망 하향 → 예상 이익·매출 부담",
+      "evidence": [
+        {
+          "rule": "earnings_above",
+          "direction": "positive",
+          "scope": "company",
+          "reason": "EPS 예상 상회 → 수익 기대 개선 가능",
+          "quote": "EPS Beats Estimates But Cuts FY2027"
+        },
+        {
+          "rule": "guidance_down",
+          "direction": "negative",
+          "scope": "company",
+          "reason": "실적 전망 하향 → 예상 이익·매출 부담",
+          "quote": "Cuts FY2027 Revenue Guidance"
+        }
+      ],
+      "caveat": "기사에 근거한 단기 영향 추정 · 선반영·실제 가격 반응 미확인"
+    }
+  },
+  {
+    "id": "3",
+    "title": "U.S. CPI 3.2% vs 3.0% Est",
+    "entities": [
+      {
+        "symbol": "SPY"
+      }
+    ],
+    "marketImpact": {
+      "version": 1,
+      "method": "event_rules",
+      "basisTitle": "U.S. CPI 3.2% vs 3.0% Est",
+      "direction": "negative",
+      "scope": "us_equities",
+      "targets": [],
+      "reason": "미 물가 예상 상회 → 긴축·할인율 부담 확대 가능",
+      "evidence": [
+        {
+          "rule": "us_inflation_above",
+          "direction": "negative",
+          "scope": "us_equities",
+          "reason": "미 물가 예상 상회 → 긴축·할인율 부담 확대 가능",
+          "quote": "U.S. CPI 3.2% vs 3.0% Est"
+        }
+      ],
+      "caveat": "기사에 근거한 단기 영향 추정 · 선반영·실제 가격 반응 미확인"
+    }
+  }
+]

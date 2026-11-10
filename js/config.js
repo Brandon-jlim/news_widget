@@ -67,10 +67,8 @@ window.NEWS_WIDGET_CONFIG = {
   },
 
   sentiment: {
+    // Event-based estimates with target and reasoning; no legacy keyword fallback.
     enabled: true,
-    positiveLabel: '호재',
-    negativeLabel: '악재',
-    neutralLabel: '중립',
   },
   pinning: {
     enabled: true,

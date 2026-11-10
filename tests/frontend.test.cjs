@@ -15,6 +15,7 @@ class Element {
 }
 const headline = { id: '1', title: 'Fed cuts rates', titleKo: '연준 금리 인하', publishedAt: new Date().toISOString(), url: 'https://example.test/article' };
 const fresh = () => ({ updatedAt: new Date().toISOString(), items: [{...headline}], meta: {} });
+const impactExamples = JSON.parse(fs.readFileSync(path.join(root, 'tests/market_impact_examples.json'), 'utf8'));
 
 async function boot(payload, query = '', runtime = {}, EventSource = undefined, saved = {}) {
   const nodes = new Map(), store = new Map(Object.entries(saved));
@@ -25,7 +26,7 @@ async function boot(payload, query = '', runtime = {}, EventSource = undefined, 
   c.window.EventSource = EventSource;
   c.fetch = async url => { requestedUrl = url; return {ok:true,json:async()=>payload}; };
   vm.createContext(c);
-  for (const filename of ['config.js', 'translation-quality.js', 'news-source.js', 'news-context.js', 'feed-health.js', 'app.js']) {
+  for (const filename of ['config.js', 'translation-quality.js', 'market-impact.js', 'news-source.js', 'news-context.js', 'feed-health.js', 'app.js']) {
     let code = fs.readFileSync(path.join(root, 'js', filename), 'utf8');
     if (filename === 'app.js') code = code.replace(/\}\)\(\);\s*$/, 'window.audit = {state, runtimeConfig, refreshNews, switchFeedTab, togglePin};\n})();');
     vm.runInContext(code, c, {filename});
@@ -334,4 +335,38 @@ test('old pinned translations are checked on restore without deleting the pin', 
   const links=b.nodes.get('news-list').querySelectorAll('.news-card__title-link');
   assert.equal(links[0].textContent,'Acme earnings');
   assert.equal(b.app.state.pinnedEntries[0].item.translationStatus,'review');
+});
+
+test('impact estimates show direction, affected target and reasoning, including mixed evidence', async () => {
+  for (const [index,label] of ['호재 예상','악재 예상','영향 혼재','악재 예상'].entries()) {
+    const item={...impactExamples[index],publishedAt:new Date().toISOString()};
+    const b=await boot({...fresh(),items:[item]});
+    const chips=b.nodes.get('news-list').querySelectorAll('.meta-chip');
+    const chip=chips.find(x=>x.textContent===label);
+    assert.ok(chip);
+    assert.match(chip.title,/실제 가격 반응 미확인/);
+    const reason=b.nodes.get('news-list').querySelectorAll('.news-card__impact')[0];
+    assert.match(reason.textContent,index===3 ? /미국 증시/ : /ACME/);
+    assert.ok(reason.textContent.includes(item.marketImpact.reason));
+  }
+});
+
+test('legacy sentiment, stale assessment and ungrounded directional data never create a badge', async () => {
+  const valid=impactExamples[0];
+  for(const marketImpact of [undefined,{...valid.marketImpact,version:0},{...valid.marketImpact,evidence:[]},
+    {...valid.marketImpact,scope:'company',targets:[]},{...valid.marketImpact,basisTitle:'different headline'}]) {
+    const b=await boot({...fresh(),items:[{...valid,marketImpact,sentiment:'positive'}]});
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.meta-chip--sentiment').length,0);
+  }
+  const b=await boot({...fresh(),items:[{...headline,title:'Amazon Daily Drops Up To 60% Off',sentiment:'negative'}]});
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.meta-chip--sentiment').length,0);
+});
+
+test('saved pins retain explained estimates but discard obsolete word-score labels', async () => {
+  for(const item of [{...impactExamples[0],originalTitle:impactExamples[0].title}, {...headline,sentiment:'negative'}]) {
+    const saved={'news-overlay-widget.pins.v1.combined':JSON.stringify([{key:`id:${item.id}`,pinnedAt:Date.now(),item}])};
+    const b=await boot({...fresh(),items:[]},'',{},undefined,saved);
+    const chips=b.nodes.get('news-list').querySelectorAll('.meta-chip--sentiment');
+    assert.equal(chips.length,item.marketImpact?1:0);
+  }
 });

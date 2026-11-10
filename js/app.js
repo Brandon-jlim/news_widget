@@ -521,15 +521,17 @@
 
       const meta = document.createElement('div');
       meta.className = 'news-card__meta';
-      const sentiment = resolveSentiment(item);
+      const impact = runtimeConfig.sentiment?.enabled !== false ? window.NewsMarketImpact.describe(item) : null;
       if (item.source) meta.appendChild(makeChip(item.source, 'meta-chip--source'));
       const typeChip = makeChip(newsType.label, `meta-chip--type meta-chip--${newsType.kind}`);
       typeChip.title = newsType.basis;
       meta.appendChild(typeChip);
       const age = item.publishedAt ? Date.now() - new Date(item.publishedAt).getTime() : Infinity;
       if (age >= 0 && age < 300_000) meta.appendChild(makeChip('최근 5분', 'meta-chip--fresh'));
-      if (runtimeConfig.sentiment?.enabled !== false && sentiment !== 'neutral') {
-        meta.appendChild(makeSentimentChip(sentiment));
+      if (impact) {
+        const chip = makeChip(impact.label, `meta-chip--sentiment meta-chip--sentiment-${impact.impact.direction}`);
+        chip.title = impact.detail;
+        meta.appendChild(chip);
       }
       const timeChip = makeChip(formatPublishedLabel(item), 'meta-chip--time');
       if (item.publishedAt) timeChip.title = `${formatAbsoluteDateLabel(new Date(item.publishedAt))} KST`;
@@ -597,6 +599,13 @@
 
       card.appendChild(meta);
       card.appendChild(titleNode);
+      if (impact) {
+        const explanation = document.createElement('p');
+        explanation.className = 'news-card__impact';
+        explanation.textContent = impact.summary;
+        explanation.title = impact.detail;
+        card.appendChild(explanation);
+      }
       const publication = window.NewsContext.publication(item);
       const publicationEl = document.createElement('p');
       publicationEl.className = 'news-card__publication';
@@ -638,88 +647,6 @@
     chip.className = ['meta-chip', extraClass].filter(Boolean).join(' ');
     chip.textContent = text;
     return chip;
-  }
-
-  function makeSentimentChip(sentiment) {
-    const normalized = normalizeSentiment(sentiment);
-    const labels = {
-      positive: runtimeConfig.sentiment?.positiveLabel || '호재',
-      negative: runtimeConfig.sentiment?.negativeLabel || '악재',
-      neutral: runtimeConfig.sentiment?.neutralLabel || '중립',
-    };
-    return makeChip(labels[normalized] || labels.neutral, `meta-chip--sentiment meta-chip--sentiment-${normalized}`);
-  }
-
-  function resolveSentiment(item) {
-    const direct = normalizeSentiment(item?.sentiment || item?.tone || item?.status || item?.impact);
-    if (direct !== 'neutral' || String(item?.sentiment || item?.tone || item?.status || item?.impact || '').trim()) {
-      return direct;
-    }
-    return inferSentiment(item);
-  }
-
-  function normalizeSentiment(value) {
-    const raw = String(value || '').trim().toLowerCase();
-    if (!raw) {
-      return 'neutral';
-    }
-    if (['positive', 'bullish', 'good', 'up', '호재', '긍정', '상승'].includes(raw)) {
-      return 'positive';
-    }
-    if (['negative', 'bearish', 'bad', 'down', '악재', '부정', '하락'].includes(raw)) {
-      return 'negative';
-    }
-    return 'neutral';
-  }
-
-  function inferSentiment(item) {
-    const text = `${item?.title || ''} ${item?.titleKo || ''} ${item?.category || ''}`.toLowerCase();
-    let score = 0;
-
-    const positiveTerms = [
-      'rally', 'rallies', 'gain', 'gains', 'advance', 'advances', 'rebound', 'rebounds', 'rise', 'rises', 'record high',
-      'optimism', 'boost', 'beats', 'beat', 'ceasefire', 'peace hopes', 'progress', 'rate cuts', 'cooling inflation', 'easing',
-      '반등', '상승', '급등', '랠리', '최고치', '호전', '완화', '휴전', '낙관', '호조', '금리 인하', '금리인하'
-    ];
-    const negativeTerms = [
-      'selloff', 'falls', 'fall', 'slump', 'slumps', 'drop', 'drops', 'decline', 'declines', 'crash', 'concern', 'worry',
-      'fears', 'hawkish', 'hot inflation', 'sticky inflation', 'war', 'tariff', 'sanction', 'volatility', 'uncertainty',
-      '하락', '급락', '악화', '매도', '우려', '경계', '긴장', '전쟁', '제재', '불안', '변동성'
-    ];
-
-    positiveTerms.forEach((term) => {
-      if (text.includes(term)) score += 1;
-    });
-    negativeTerms.forEach((term) => {
-      if (text.includes(term)) score -= 1;
-    });
-
-    if ((text.includes('yield') || text.includes('국채금리') || text.includes('수익률')) && /(fall|falls|fell|down|ease|easing|drop|slip|하락|완화)/.test(text)) {
-      score += 2;
-    }
-    if ((text.includes('yield') || text.includes('국채금리') || text.includes('수익률')) && /(rise|rises|rose|up|jump|surge|spike|상승|급등)/.test(text)) {
-      score -= 2;
-    }
-    if ((text.includes('oil') || text.includes('crude') || text.includes('원유')) && /(fall|falls|fell|down|drop|slip|하락|완화)/.test(text)) {
-      score += 2;
-    }
-    if ((text.includes('oil') || text.includes('crude') || text.includes('원유')) && /(rise|rises|rose|up|jump|surge|spike|상승|급등)/.test(text)) {
-      score -= 2;
-    }
-    if ((text.includes('inflation') || text.includes('cpi') || text.includes('pce') || text.includes('물가')) && /(cool|cooling|ease|easing|soft|둔화|완화)/.test(text)) {
-      score += 2;
-    }
-    if ((text.includes('inflation') || text.includes('cpi') || text.includes('pce') || text.includes('물가')) && /(hot|sticky|reaccelerat|surge|상승|재가속)/.test(text)) {
-      score -= 2;
-    }
-
-    if (score >= 2) {
-      return 'positive';
-    }
-    if (score <= -2) {
-      return 'negative';
-    }
-    return 'neutral';
   }
 
   function buildFooterText(statusKind, displayItems) {
@@ -1009,7 +936,7 @@
       publishedDate: String(base.publishedDate || '').trim(),
       source: String(base.source || '').trim(),
       category: String(base.category || '').trim(),
-      sentiment: String(base.sentiment || '').trim(),
+      marketImpact: window.NewsMarketImpact.read(base),
       description: String(base.description || '').trim(),
       snippet: String(base.snippet || '').trim(),
       url: String(base.url || '').trim(),

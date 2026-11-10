@@ -87,7 +87,7 @@
       publishedDate: publishedDateOnly || '',
       source: normalizeText(rawItem.source || rawItem.provider || rawItem.feedTitle || fallbackSourceLabel || 'Feed'),
       category: normalizeText(rawItem.category || rawItem.section || rawItem.topic || ''),
-      sentiment: normalizeText(rawItem.sentiment || rawItem.tone || rawItem.status || rawItem.impact || '').toLowerCase(),
+      marketImpact: window.NewsMarketImpact.read(rawItem),
       description: normalizeText(rawItem.description || rawItem.summary || rawItem.excerpt || ''),
       snippet: normalizeText(rawItem.snippet || rawItem.description || rawItem.summary || rawItem.excerpt || ''),
       url: normalizeText(rawItem.url || rawItem.link || rawItem.storyUrl || ''),
