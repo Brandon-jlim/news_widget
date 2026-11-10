@@ -26,9 +26,11 @@ from xml.etree import ElementTree as ET
 try:
     from .storage import atomic_write_json, read_json
     from .feed_sources import OFFICIAL_FEEDS, PUBLIC_RSS_FEEDS
+    from .translation_quality import inspect_translation, review_record
 except ImportError:
     from storage import atomic_write_json, read_json
     from feed_sources import OFFICIAL_FEEDS, PUBLIC_RSS_FEEDS
+    from translation_quality import inspect_translation, review_record
 
 
 # Keep an application identifier, but use a browser-compatible User-Agent shape.
@@ -109,6 +111,7 @@ DEFAULT_DEEPL_INSTRUCTIONS = [
     "Translate into concise, natural Korean financial-news headline style.",
     "Prefer familiar Korean market terms such as 연준, 미 국채금리, 월가, S&P 500, 나스닥.",
     "Avoid honorifics, keep the meaning faithful, and make the headline readable in a small broadcast overlay.",
+    "Write company names consistently in Hangul or retain their original Latin spelling. Never mix Chinese characters into a transliterated Korean company name.",
 ]
 
 DEFAULT_KO_REPLACEMENTS = {
@@ -2141,10 +2144,40 @@ def load_translation_cache(path_text: str) -> tuple[Path | None, dict[str, Any]]
     return path, {}
 
 
-def save_translation_cache(path: Path | None, cache: dict[str, Any]) -> None:
-    if path is None:
+TRANSLATION_CACHE_LOCK = threading.Lock()
+
+
+def save_translation_cache(path: Path | None, updates: dict[str, Any]) -> None:
+    if path is None or not updates:
         return
-    atomic_write_json(path, cache)
+    with TRANSLATION_CACHE_LOCK:
+        current = read_json(path, {})
+        if not isinstance(current, dict):
+            current = {}
+        current.update(updates)
+        atomic_write_json(path, current)
+
+
+def checked_translation(item: dict, cached: Any, args: argparse.Namespace,
+                        replacements: dict, status: str = "cached") -> tuple[dict, Any] | None:
+    output = dict(item)
+    output.pop("translationError", None)
+    output.pop("translationIssue", None)
+    if isinstance(cached, dict) and cached.get("status") == "review":
+        output.update(titleKo="", translationStatus="review", translationIssue="mixed_script")
+        return output, review_record()
+    if not isinstance(cached, str) or not cached.strip():
+        return None
+    source = clean_text(item.get("title"))
+    repaired, raw_issue = inspect_translation(source, cached, args.translate_target)
+    text, issue = inspect_translation(source, apply_replacements(cached if raw_issue else repaired, replacements),
+                                     args.translate_target)
+    if issue:
+        output.update(titleKo="", translationStatus="review", translationIssue=issue)
+        return output, review_record()
+    output.update(titleKo=text, translationStatus=status)
+    # Keep normal term substitutions reversible, but never persist a known typo.
+    return output, text if raw_issue else repaired
 
 
 def build_translator(args: argparse.Namespace) -> Translator:
@@ -2191,6 +2224,9 @@ class BackgroundTranslator:
                 if item.get("titleKo"):
                     self.cache[self.active_key] = item["titleKo"]
                     self.failed.pop(self.active_key, None)
+                elif item.get("translationStatus") == "review":
+                    self.cache[self.active_key] = review_record()
+                    self.failed.pop(self.active_key, None)
                 else:
                     self.failed[self.active_key] = time.monotonic() + 300
                     error = item.get("translationError", "")
@@ -2200,17 +2236,24 @@ class BackgroundTranslator:
                 self.failed[self.active_key] = time.monotonic() + 300
             self.future = None
         output = []
+        cache_updates = {}
         for item in items:
             key = translation_cache_key(item, args)
             cached = self.cache.get(key)
-            if cached:
-                output.append(dict(item, titleKo=apply_replacements(cached, self.replacements), translationStatus="cached"))
+            checked = checked_translation(item, cached, args, self.replacements)
+            if checked:
+                translated_item, entry = checked
+                output.append(translated_item)
+                if entry != cached:
+                    self.cache[key] = entry
+                    cache_updates[key] = entry
                 continue
             failed = self.failed.get(key, 0) > time.monotonic() or self.retry_at > time.monotonic()
             output.append(dict(item, titleKo="", translationStatus="failed" if failed else "pending"))
             if not failed and self.future is None:
                 self.active_key = key
                 self.future = self.executor.submit(translate_items, [dict(item)], self.args)
+        save_translation_cache(self.cache_path, cache_updates)
         return output, billed
 
     def close(self):
@@ -2226,6 +2269,7 @@ def translate_items(items: list[dict[str, Any]], args: argparse.Namespace) -> tu
     cache_path, cache = load_translation_cache(args.translate_cache)
     total_billed = 0
     translated_items: list[dict[str, Any]] = []
+    cache_updates: dict[str, Any] = {}
     translator = None
     translator_error = ""
     try:
@@ -2240,9 +2284,12 @@ def translate_items(items: list[dict[str, Any]], args: argparse.Namespace) -> tu
         # An original headline must never be labeled as a Korean translation.
         item_copy.update(titleKo="", translationStatus="failed")
         item_copy.pop("translationError", None)
-        cached = clean_text(cache.get(cache_key))
-        if cached:
-            item_copy.update(titleKo=apply_replacements(cached, replacements), translationStatus="cached")
+        cached = cache.get(cache_key)
+        checked = checked_translation(item, cached, args, replacements)
+        if checked:
+            item_copy, entry = checked
+            if entry != cached:
+                cache_updates[cache_key] = entry
         elif translator_error:
             item_copy["translationError"] = translator_error
         else:
@@ -2251,9 +2298,10 @@ def translate_items(items: list[dict[str, Any]], args: argparse.Namespace) -> tu
                 translated_text = clean_text(result.text)
                 if not translated_text:
                     raise RelayError("번역문이 비어 있습니다")
-                cache[cache_key] = translated_text
                 total_billed += result.billed_characters
-                item_copy.update(titleKo=apply_replacements(translated_text, replacements), translationStatus="translated")
+                item_copy, entry = checked_translation(item, translated_text, args, replacements, "translated")
+                cache[cache_key] = entry
+                cache_updates[cache_key] = entry
             except Exception as exc:
                 message = safe_error(exc, args)
                 item_copy["translationError"] = message
@@ -2261,7 +2309,7 @@ def translate_items(items: list[dict[str, Any]], args: argparse.Namespace) -> tu
                 if isinstance(exc, RequestFailure) and exc.status in {401, 403, 429, 456}:
                     translator_error = message
         translated_items.append(item_copy)
-    save_translation_cache(cache_path, cache)
+    save_translation_cache(cache_path, cache_updates)
     return translated_items, total_billed
 
 
@@ -2286,6 +2334,17 @@ def write_payload(out_path: Path, items: list[dict[str, Any]], meta: dict[str, A
     else:
         successes = [value.get("lastSuccessAt") for value in statuses.values() if value.get("lastSuccessAt")]
         updated_at = max(successes) if successes else (None if failed else now_iso())
+    # Also check retained public snapshots from older versions, even during outages.
+    checked_items = []
+    for item in items:
+        if item.get("titleKo"):
+            text, issue = inspect_translation(clean_text(item.get("title")), clean_text(item["titleKo"]))
+            item = dict(item, titleKo=text)
+            if issue:
+                item.update(translationStatus="review", translationIssue=issue)
+        checked_items.append(item)
+    items = checked_items
+    meta["translation_review_count"] = sum(item.get("translationStatus") == "review" for item in items)
     meta["translation_failed_count"] = sum(item.get("translationStatus") == "failed" for item in items)
     meta["translation_pending_count"] = sum(item.get("translationStatus") == "pending" for item in items)
     meta["final_count"] = len(items)

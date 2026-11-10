@@ -1,0 +1,12 @@
+[
+  {"source":"TransDigm Group, Take-Two And 3 Stocks To Watch", "text":"트랜스디그姆·테이크투 등 주목 종목", "expected":"TransDigm·테이크투 등 주목 종목"},
+  {"source":"TransDigmX reports earnings", "text":"트랜스디그姆 실적 발표", "issue":"mixed_script"},
+  {"source":"Acme reports earnings", "text":"애크姆 실적 발표", "issue":"mixed_script"},
+  {"source":"Acme reports earnings", "text":"Acme姆 실적 발표", "issue":"mixed_script"},
+  {"source":"Company earnings", "text":"회사𠀀 실적 발표", "issue":"mixed_script"},
+  {"source":"US and China stocks rise", "text":"美·中 증시 상승, AI株 강세", "expected":"美·中 증시 상승, AI株 강세"},
+  {"source":"US and China trade", "text":"美中무역 협상…전년比 증가, 제한無", "expected":"美中무역 협상…전년比 증가, 제한無"},
+  {"source":"Dollar climbs to two-month high", "text":"달러 2개월来 최고", "expected":"달러 2개월来 최고"},
+  {"source":"騰訊 reports earnings", "text":"騰訊은 실적 발표", "expected":"騰訊은 실적 발표"},
+  {"source":"Semiconductor stocks rise", "text":"반도체(半導體) 주식 상승", "expected":"반도체(半導體) 주식 상승"}
+]

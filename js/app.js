@@ -547,6 +547,7 @@
         meta.appendChild(makeChip('갱신 확인 필요'));
       }
       if (item.translationStatus === 'failed') meta.appendChild(makeChip('원문'));
+      if (item.translationStatus === 'review') meta.appendChild(makeChip('번역 확인 · 원문'));
       if (item.translationStatus === 'pending') meta.appendChild(makeChip('번역 중'));
 
       const titleText = resolveDisplayTitle(item);
@@ -988,17 +989,20 @@
 
   function sanitizePinnedItem(item) {
     const base = item && typeof item === 'object' ? item : {};
+    const originalTitle = String(base.originalTitle || base.title || '').trim();
+    const quality = window.NewsTranslationQuality.inspect(originalTitle, String(base.titleKo || '').trim());
 
     return {
       id: String(base.id || '').trim(),
-      title: String(base.title || '').trim(),
-      titleKo: String(base.titleKo || '').trim(),
-      originalTitle: String(base.originalTitle || '').trim(),
+      title: quality.issue ? originalTitle : String(base.title || '').trim(),
+      titleKo: quality.text,
+      originalTitle,
       symbols: Array.isArray(base.symbols) ? base.symbols.map(String) : [],
       channels: Array.isArray(base.channels) ? base.channels.filter(x => typeof x === 'string') : [],
       tags: Array.isArray(base.tags) ? base.tags.filter(x => typeof x === 'string') : [],
       updatedAt: String(base.updatedAt || '').trim(),
-      translationStatus: String(base.translationStatus || '').trim(),
+      translationStatus: quality.issue ? 'review' : String(base.translationStatus || '').trim(),
+      translationIssue: quality.issue || String(base.translationIssue || '').trim(),
       official: Boolean(base.official),
       contentKind: String(base.contentKind || '').trim(),
       publishedAt: String(base.publishedAt || '').trim(),

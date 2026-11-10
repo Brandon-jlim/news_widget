@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "allowedHan": "美中英日韓北南獨佛伊印臺台港澳加俄露歐亞株比無有前後內外對萬億兆來来",
+  "nameRepairs": [
+    {"source": "TransDigm", "invalid": "트랜스디그姆", "replacement": "TransDigm"}
+  ]
+}

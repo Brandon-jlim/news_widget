@@ -21,11 +21,11 @@ async function boot(payload, query = '', runtime = {}, EventSource = undefined, 
   let requestedUrl;
   const c = { console, URL, URLSearchParams, AbortController, Date, Intl };
   c.document = {getElementById(id) { if (!nodes.has(id)) nodes.set(id, new Element()); return nodes.get(id); }, createElement() { return new Element(); }, addEventListener() {} };
-  c.window = { NEWS_WIDGET_RUNTIME: runtime, location: { search: query }, localStorage: {getItem:k=>store.get(k)||null, setItem:(k,v)=>store.set(k,v)}, setTimeout:()=>1, clearTimeout(){}, open(){} };
+  c.window = { NEWS_WIDGET_RUNTIME: {translationPolicy:JSON.parse(fs.readFileSync(path.join(root,'translation-policy.json'),'utf8')), ...runtime}, location: { search: query }, localStorage: {getItem:k=>store.get(k)||null, setItem:(k,v)=>store.set(k,v)}, setTimeout:()=>1, clearTimeout(){}, open(){} };
   c.window.EventSource = EventSource;
   c.fetch = async url => { requestedUrl = url; return {ok:true,json:async()=>payload}; };
   vm.createContext(c);
-  for (const filename of ['config.js', 'news-source.js', 'news-context.js', 'feed-health.js', 'app.js']) {
+  for (const filename of ['config.js', 'translation-quality.js', 'news-source.js', 'news-context.js', 'feed-health.js', 'app.js']) {
     let code = fs.readFileSync(path.join(root, 'js', filename), 'utf8');
     if (filename === 'app.js') code = code.replace(/\}\)\(\);\s*$/, 'window.audit = {state, runtimeConfig, refreshNews, switchFeedTab, togglePin};\n})();');
     vm.runInContext(code, c, {filename});
@@ -306,4 +306,32 @@ test('type filtering and pinned snapshots preserve editorial classifications', a
   b.nodes.get('news-type').value='economic';
   b.nodes.get('news-type').events.change();
   assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title')[0].textContent,'검색 결과가 없습니다');
+});
+
+test('browser and server share mixed-script policy, preserving legitimate Han abbreviations', async () => {
+  const b=await boot(fresh());
+  const inspect=b.c.window.NewsTranslationQuality.inspect;
+  const cases=JSON.parse(fs.readFileSync(path.join(__dirname,'translation_quality_cases.json'),'utf8'));
+  for(const sample of cases){
+    const result=inspect(sample.source,sample.text);
+    assert.equal(result.issue,sample.issue||'',sample.text);
+    assert.equal(result.text,sample.expected||'',sample.text);
+  }
+  assert.equal(inspect('Acme','애크姆'.normalize('NFD')).issue,'mixed_script');
+});
+
+test('old public feeds show the original with a review label when translation is suspect', async () => {
+  const b=await boot({...fresh(),items:[{...headline,title:'Acme earnings',titleKo:'애크姆 실적',translationStatus:'cached'}]});
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].textContent,'Acme earnings');
+  assert.equal(b.status(),'번역 확인 필요 · 원문 표시');
+  assert.ok(b.nodes.get('news-list').querySelectorAll('.meta-chip').some(x=>x.textContent==='번역 확인 · 원문'));
+});
+
+test('old pinned translations are checked on restore without deleting the pin', async () => {
+  const saved={'news-overlay-widget.pins.v1.combined':JSON.stringify([{key:'old',pinnedAt:Date.now(),item:{...headline,id:'old',originalTitle:'Acme earnings',title:'애크姆 실적',titleKo:'애크姆 실적'}}])};
+  const b=await boot(fresh(),' ',{},undefined,saved);
+  assert.equal(b.app.state.pinnedEntries.length,1);
+  const links=b.nodes.get('news-list').querySelectorAll('.news-card__title-link');
+  assert.equal(links[0].textContent,'Acme earnings');
+  assert.equal(b.app.state.pinnedEntries[0].item.translationStatus,'review');
 });

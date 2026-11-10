@@ -59,8 +59,9 @@
   }
 
   function normalizeNewsItem(rawItem, fallbackSourceLabel) {
-    const titleKo = normalizeText(rawItem.titleKo || rawItem.title_ko || rawItem.headlineKo);
-    const title = normalizeText(rawItem.title || rawItem.headline || rawItem.name);
+    const title = normalizeText(rawItem.originalTitle || rawItem.title || rawItem.headline || rawItem.name);
+    const quality = window.NewsTranslationQuality.inspect(title, normalizeText(rawItem.titleKo || rawItem.title_ko || rawItem.headlineKo));
+    const titleKo = quality.text;
     const rawPublished = rawItem.publishedAt || rawItem.published_at || rawItem.pubDate || rawItem.time || rawItem.datetime;
     const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(String(rawPublished || ''));
     const publishedDate = dateOnly ? null : parseDate(rawPublished);
@@ -73,7 +74,8 @@
       title: titleKo || title || '제목 없음',
       originalTitle: title,
       titleKo: titleKo || '',
-      translationStatus: normalizeText(rawItem.translationStatus || ''),
+      translationStatus: quality.issue ? 'review' : normalizeText(rawItem.translationStatus || ''),
+      translationIssue: quality.issue || normalizeText(rawItem.translationIssue || ''),
       official: Boolean(rawItem.official),
       contentKind: normalizeText(rawItem.contentKind || ''),
       firstSeenAt: normalizeText(rawItem.firstSeenAt || ''),

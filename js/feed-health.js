@@ -28,6 +28,9 @@
       const success = Date.parse(source.lastSuccessAt || '');
       return !Number.isFinite(success) || now - success > Math.max(180, (source.effectiveIntervalSeconds || 45) * 2) * 1000;
     })) return { kind: 'warn', label: '소스 갱신 지연' };
+    if (meta.translation_review_count > 0 || items.some(item => item.translationStatus === 'review')) {
+      return { kind: 'warn', label: '번역 확인 필요 · 원문 표시' };
+    }
     if (meta.translation_failed_count > 0 || items.some(item => item.translationStatus === 'failed')) {
       return { kind: 'warn', label: '일부 번역 실패 · 원문 표시' };
     }
