@@ -6,6 +6,7 @@
     <title>Market Brief · 미국 증시 뉴스</title>
     <link rel="stylesheet" href="styles.css" />
     <script defer src="js/config.js"></script>
+    <script defer src="js/appearance.js"></script>
     <script defer src="widget-runtime.js"></script>
     <script defer src="js/translation-quality.js"></script>
     <script defer src="js/market-impact.js"></script>
@@ -19,9 +20,12 @@
       <section class="news-widget" id="news-widget" data-status="loading" data-edit-mode="false" data-view="panel" aria-label="미국 증시 뉴스">
         <div class="widget-topline">
           <p class="eyebrow"><span class="brand-mark" aria-hidden="true"></span>MARKET BRIEF</p>
-          <div class="view-switch" role="group" aria-label="화면 크기">
-            <button id="view-widget" type="button" aria-pressed="false">위젯</button>
-            <button id="view-panel" type="button" aria-pressed="true">패널</button>
+          <div class="widget-top-controls">
+            <div class="view-switch" role="group" aria-label="화면 크기">
+              <button id="view-widget" type="button" aria-pressed="false">위젯</button>
+              <button id="view-panel" type="button" aria-pressed="true">패널</button>
+            </div>
+            <button class="settings-open" id="settings-open" type="button" aria-haspopup="dialog" aria-controls="appearance-settings" title="테마·색상 설정">설정</button>
           </div>
         </div>
         <header class="widget-header">
@@ -102,5 +106,32 @@
         </footer>
       </section>
     </main>
+    <dialog class="settings-dialog" id="appearance-settings" aria-labelledby="settings-title" aria-describedby="settings-description">
+      <div class="settings-header">
+        <h2 id="settings-title">화면 설정</h2>
+        <button class="settings-close" id="settings-close" type="button" aria-label="설정 닫기">×</button>
+      </div>
+      <p class="settings-description" id="settings-description">위젯과 패널에 같은 테마를 적용합니다.</p>
+      <fieldset class="settings-group">
+        <legend>테마 <span id="settings-theme-name">미드나이트</span></legend>
+        <div class="theme-presets" id="theme-presets">
+          <button class="theme-preset" type="button" data-theme="midnight" aria-pressed="true"><span class="theme-swatch theme-swatch--midnight" aria-hidden="true"></span>미드나이트</button>
+          <button class="theme-preset" type="button" data-theme="graphite" aria-pressed="false"><span class="theme-swatch theme-swatch--graphite" aria-hidden="true"></span>차콜</button>
+          <button class="theme-preset" type="button" data-theme="forest" aria-pressed="false"><span class="theme-swatch theme-swatch--forest" aria-hidden="true"></span>포레스트</button>
+          <button class="theme-preset" type="button" data-theme="light" aria-pressed="false"><span class="theme-swatch theme-swatch--light" aria-hidden="true"></span>라이트</button>
+        </div>
+      </fieldset>
+      <fieldset class="settings-group">
+        <legend>색상 직접 선택</legend>
+        <label class="settings-color" for="theme-background"><span>배경색 <output id="theme-background-value">#121720</output></span><input id="theme-background" type="color" value="#121720" /></label>
+        <label class="settings-color" for="theme-accent"><span>포인트색 <output id="theme-accent-value">#85b7ff</output></span><input id="theme-accent" type="color" value="#85b7ff" /></label>
+        <p class="settings-hint">글자와 강조색은 읽기 편하게 자동 조정됩니다.</p>
+      </fieldset>
+      <p class="settings-save-status" id="settings-save-status" role="status">변경하면 이 브라우저에 자동 저장됩니다.</p>
+      <div class="settings-footer">
+        <button class="toolbar-btn" id="theme-reset" type="button">기본 테마 복원</button>
+        <button class="settings-done" id="settings-done" type="button">완료</button>
+      </div>
+    </dialog>
   </body>
 </html>

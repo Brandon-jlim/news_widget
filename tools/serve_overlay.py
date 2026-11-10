@@ -15,7 +15,7 @@ except ImportError:
     from translation_quality import POLICY
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ("index.html", "styles.css", "js/config.js", "js/translation-quality.js", "js/market-impact.js", "js/news-source.js", "js/news-context.js", "js/feed-health.js", "js/app.js")
+ASSETS = ("index.html", "styles.css", "js/config.js", "js/appearance.js", "js/translation-quality.js", "js/market-impact.js", "js/news-source.js", "js/news-context.js", "js/feed-health.js", "js/app.js")
 
 
 class WidgetHandler(SimpleHTTPRequestHandler):
