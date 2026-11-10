@@ -15,6 +15,8 @@
   const viewWidgetEl = document.getElementById('view-widget');
   const viewPanelEl = document.getElementById('view-panel');
   const typeFilterEl = document.getElementById('news-type');
+  const displayCountEls = Object.fromEntries(['widget', 'panel'].map(view => [view, document.getElementById(`display-count-${view}`)]));
+  const displayCountStatusEl = document.getElementById('display-count-status');
   const footerZoneEl = document.getElementById('footer-zone');
   const clockElements = Object.fromEntries(['left', 'right'].map(side => [side, {
     time: document.getElementById(`clock-${side}`),
@@ -48,6 +50,7 @@
     editMode: pinningEnabled && Boolean(runtimeConfig.pinning?.startInEditMode),
     pinnedEntries: loadPinnedEntries(runtimeConfig.activeTabKey),
     view: runtimeConfig.view,
+    displayLimits: loadDisplayLimits(),
     largeText: readPreference('largeText') === 'true',
     search: '',
     typeFilter: 'all',
@@ -56,6 +59,7 @@
 
   titleEl.textContent = getActiveWidgetTitle();
   setupToolbar();
+  setupDisplayCounts();
   setupTabs();
   start();
 
@@ -147,8 +151,75 @@
   }
 
   function savePreference(key, value) {
-    try { window.localStorage?.setItem(`news-overlay-widget.reader.${key}`, value); }
-    catch { /* Browsing remains usable when storage is unavailable. */ }
+    try {
+      if (!window.localStorage) return false;
+      window.localStorage.setItem(`news-overlay-widget.reader.${key}`, value);
+      return true;
+    } catch { return false; }
+  }
+
+  function parseDisplayLimit(value) {
+    const count = Number(value);
+    return Number.isInteger(count) && count > 0 ? Math.min(30, count) : null;
+  }
+
+  function loadDisplayLimits() {
+    return {
+      widget: parseDisplayLimit(readPreference('limit.widget')) || Math.min(5, runtimeConfig.maxItems),
+      panel: parseDisplayLimit(readPreference('limit.panel')) || runtimeConfig.maxItems,
+    };
+  }
+
+  function displayLimit(view = state.view) {
+    return runtimeConfig.explicitLimit || state.displayLimits[view];
+  }
+
+  function updateDisplayCountControls() {
+    for (const [view, select] of Object.entries(displayCountEls)) {
+      if (select) select.value = String(displayLimit(view));
+    }
+  }
+
+  function setupDisplayCounts() {
+    for (const [view, select] of Object.entries(displayCountEls)) {
+      if (!select) continue;
+      for (let count = 1; count <= 30; count += 1) {
+        const option = document.createElement('option');
+        option.value = String(count);
+        option.textContent = `${count}개`;
+        select.appendChild(option);
+      }
+      select.addEventListener('change', () => {
+        const count = parseDisplayLimit(select.value);
+        if (!count) return updateDisplayCountControls();
+        state.displayLimits[view] = count;
+        // A deliberate setting change replaces the URL override too, including after reload.
+        runtimeConfig.explicitLimit = null;
+        syncLocation();
+        const saved = savePreference(`limit.${view}`, String(count));
+        if (displayCountStatusEl) displayCountStatusEl.textContent = saved
+          ? '표시 개수 저장됨 · 같은 주소의 다른 창에도 적용됩니다.'
+          : '이 창에 적용했습니다. 브라우저 저장이 차단되어 새로고침하면 초기화됩니다.';
+        updateDisplayCountControls();
+        render();
+      });
+    }
+    updateDisplayCountControls();
+    window.addEventListener('storage', event => {
+      if (event.storageArea && event.storageArea !== window.localStorage) return;
+      if (event.key === null) state.displayLimits = loadDisplayLimits();
+      else {
+        const view = ['widget', 'panel'].find(view => event.key === `news-overlay-widget.reader.limit.${view}`);
+        if (!view) return;
+        const fallback = view === 'widget' ? Math.min(5, runtimeConfig.maxItems) : runtimeConfig.maxItems;
+        state.displayLimits[view] = parseDisplayLimit(event.newValue) || fallback;
+      }
+      updateDisplayCountControls();
+      if (displayCountStatusEl) displayCountStatusEl.textContent = runtimeConfig.explicitLimit
+        ? '이 창은 URL의 표시 개수를 사용합니다. 위에서 선택하면 저장된 설정으로 바뀝니다.'
+        : '다른 창에서 변경한 표시 개수를 적용했습니다.';
+      render();
+    });
   }
 
   function setView(view) {
@@ -161,6 +232,7 @@
 
   function syncLocation() {
     const query = new URLSearchParams(window.location.search);
+    if (!runtimeConfig.explicitLimit) query.delete('limit');
     query.set('view', state.view);
     if (areTabsVisible()) query.set('tab', state.activeTabKey);
     window.history?.replaceState(null, '', `?${query.toString()}`);
@@ -471,7 +543,7 @@
   function renderSkeletons() {
     newsListEl.innerHTML = '';
 
-    for (let index = 0; index < Math.min(3, runtimeConfig.maxItems); index += 1) {
+    for (let index = 0; index < Math.min(3, displayLimit()); index += 1) {
       const card = document.createElement('article');
       card.className = 'news-card skeleton-card';
       card.setAttribute('aria-hidden', 'true');
@@ -845,8 +917,7 @@
       (state.typeFilter === 'all' || window.NewsContext.classify(item).kind === state.typeFilter) &&
       (!state.search || [item.title, item.titleKo, item.originalTitle, item.source, item.category, ...(item.symbols || [])]
         .join(' ').toLowerCase().includes(state.search)));
-    const limit = runtimeConfig.explicitLimit || (state.view === 'widget' ? Math.min(5, runtimeConfig.maxItems) : runtimeConfig.maxItems);
-    return matched.slice(0, limit);
+    return matched.slice(0, displayLimit());
   }
 
   function comparePublishedDesc(left, right) {
@@ -1049,7 +1120,7 @@
     const sourceType = query.get('source');
     const sourceUrl = query.get('url');
     const widgetTitle = query.get('title');
-    const maxItems = safeNumber(query.get('limit'));
+    const maxItems = parseDisplayLimit(query.get('limit'));
     const requestedView = query.get('view') || readPreference('view');
     const refreshMs = safeNumber(query.get('refresh'));
     const startEditMode = query.get('edit') === '1';
@@ -1073,7 +1144,7 @@
     return {
       ...baseConfig,
       widgetTitle: widgetTitle || baseConfig.widgetTitle,
-      maxItems: maxItems || serverConfig.maxItems || baseConfig.maxItems,
+      maxItems: parseDisplayLimit(serverConfig.maxItems || baseConfig.maxItems) || 5,
       explicitLimit: maxItems,
       view: requestedView === 'widget' ? 'widget' : 'panel',
       refreshMs: refreshMs || baseConfig.refreshMs,

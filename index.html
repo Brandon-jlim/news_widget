@@ -28,7 +28,7 @@
               <button id="view-widget" type="button" aria-pressed="false">위젯</button>
               <button id="view-panel" type="button" aria-pressed="true">패널</button>
             </div>
-            <button class="settings-open" id="settings-open" type="button" aria-haspopup="dialog" aria-controls="appearance-settings" title="시간대·테마·색상 설정">설정</button>
+            <button class="settings-open" id="settings-open" type="button" aria-haspopup="dialog" aria-controls="appearance-settings" title="표시 개수·시간대·테마 설정">설정</button>
           </div>
         </div>
         <header class="widget-header">
@@ -148,7 +148,14 @@
         <h2 id="settings-title">화면 설정</h2>
         <button class="settings-close" id="settings-close" type="button" aria-label="설정 닫기">×</button>
       </div>
-      <p class="settings-description" id="settings-description">위젯과 패널의 시간대와 테마를 설정합니다.</p>
+      <p class="settings-description" id="settings-description">뉴스 표시 개수와 시간대, 테마를 설정합니다.</p>
+      <fieldset class="settings-group">
+        <legend>뉴스 표시 개수</legend>
+        <label class="settings-news-count" for="display-count-widget"><span>작은 위젯</span><select id="display-count-widget" aria-describedby="display-count-hint"></select></label>
+        <label class="settings-news-count" for="display-count-panel"><span>세로 패널</span><select id="display-count-panel" aria-describedby="display-count-hint"></select></label>
+        <p class="settings-hint" id="display-count-hint">각각 최대 30개까지 선택합니다. 화면 아래 뉴스는 목록을 스크롤해서 읽을 수 있습니다. 현재 받은 뉴스가 적으면 그 수만큼 표시합니다.</p>
+        <p class="settings-hint" id="display-count-status" role="status">변경하면 이 브라우저에 자동 저장됩니다.</p>
+      </fieldset>
       <fieldset class="settings-group">
         <legend>시계 시간대</legend>
         <label class="settings-timezone" for="clock-left-zone"><span>왼쪽 시계</span><select id="clock-left-zone" aria-describedby="clock-settings-hint"></select></label>

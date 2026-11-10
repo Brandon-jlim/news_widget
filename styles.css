@@ -230,8 +230,8 @@ button, a, input, [tabindex] { -webkit-tap-highlight-color: transparent; }
 .settings-color { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; font-size: 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .settings-color output { display: inline-block; margin-left: 8px; color: var(--text-dim); font-size: 10px; font-variant-numeric: tabular-nums; }
 .settings-color input { width: 45px; height: 32px; padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: var(--control); cursor: pointer; }
-.settings-timezone { display: grid; grid-template-columns: 68px minmax(0, 1fr); align-items: center; gap: 8px; margin: 10px 0; font-size: 12px; }
-.settings-timezone select { width: 100%; min-width: 0; padding: 9px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--control); color: var(--text-main); font-size: 12px; cursor: pointer; }
+.settings-timezone, .settings-news-count { display: grid; grid-template-columns: 68px minmax(0, 1fr); align-items: center; gap: 8px; margin: 10px 0; font-size: 12px; }
+.settings-timezone select, .settings-news-count select { width: 100%; min-width: 0; padding: 9px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--control); color: var(--text-main); font-size: 12px; cursor: pointer; }
 .clock-reset { margin-top: 8px; padding-left: 0; }
 .settings-hint, .settings-save-status { color: var(--text-dim); font-size: 11px; line-height: 1.7; }
 .settings-hint { margin: 10px 0 0; }

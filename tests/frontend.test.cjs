@@ -214,6 +214,72 @@ test('widget and panel modes change visible count while preserving explicit limi
   assert.equal(explicit.nodes.get('news-list').children.length,8);
 });
 
+test('settings show up to 30 articles with independent persisted widget and panel limits, without refetching', async () => {
+  const payload = {...fresh(),items:Array.from({length:35},(_,i)=>({...headline,id:String(i)}))};
+  const b = await boot(payload, '?view=widget', {maxItems:30});
+  let requests = 0;
+  b.c.fetch = async()=>{requests++;throw new Error('Count changes must not fetch');};
+  const widgetCount = b.nodes.get('display-count-widget');
+  widgetCount.value = '30'; widgetCount.events.change();
+  assert.equal(b.nodes.get('news-list').children.length,30);
+  assert.match(b.nodes.get('footer-text').textContent,/30개 표시/);
+  const panelCount = b.nodes.get('display-count-panel');
+  panelCount.value = '12'; panelCount.events.change();
+  assert.equal(b.nodes.get('news-list').children.length,30);
+  b.nodes.get('view-panel').events.click();
+  assert.equal(b.nodes.get('news-list').children.length,12);
+  assert.equal(requests,0);
+  const saved = Object.fromEntries(['widget','panel'].map(view=>{
+    const key=`news-overlay-widget.reader.limit.${view}`;
+    return [key,b.c.window.localStorage.getItem(key)];
+  }));
+  const restored = await boot(payload, '?view=widget', {maxItems:30}, undefined, saved);
+  assert.equal(restored.nodes.get('news-list').children.length,30);
+  restored.nodes.get('view-panel').events.click();
+  assert.equal(restored.nodes.get('news-list').children.length,12);
+});
+
+test('count settings replace URL overrides and storage failure still applies the selection', async () => {
+  const payload = {...fresh(),items:Array.from({length:35},(_,i)=>({...headline,id:String(i)}))};
+  const b = await boot(payload, '?view=widget&limit=8&tab=benzinga', {maxItems:30});
+  b.c.window.history = {replaceState(_state,_title,url){b.c.window.location.search=url;}};
+  const count = b.nodes.get('display-count-widget');
+  assert.equal(count.value,'8');
+  count.value='30';count.events.change();
+  assert.equal(b.nodes.get('news-list').children.length,30);
+  const query = new URLSearchParams(b.c.window.location.search);
+  assert.equal(query.has('limit'),false);
+  assert.equal(query.get('tab'),'benzinga');
+  b.c.window.localStorage.setItem=()=>{throw new Error('Storage blocked');};
+  count.value='20';count.events.change();
+  assert.equal(b.nodes.get('news-list').children.length,20);
+  assert.match(b.nodes.get('display-count-status').textContent,/저장이 차단/);
+});
+
+test('count preferences are bounded and sync between windows while retaining reading hold', async () => {
+  const payload = {...fresh(),items:Array.from({length:35},(_,i)=>({...headline,id:String(i)}))};
+  const key='news-overlay-widget.reader.limit.widget';
+  for (const [value,expected] of [['0',5],['-3',5],['invalid',5],['12.5',5],['1000',30]]) {
+    const b=await boot(payload,'?view=widget',{maxItems:30},undefined,{[key]:value});
+    assert.equal(b.nodes.get('news-list').children.length,expected);
+  }
+  const b=await boot(payload,'?view=widget',{maxItems:30});
+  b.nodes.get('pause-toggle').events.click();
+  payload.items.unshift({...headline,id:'incoming',titleKo:'고정 후 도착'});
+  await b.app.refreshNews();
+  b.c.window.dispatchEvent({type:'storage',key,newValue:'30'});
+  assert.equal(b.nodes.get('news-list').children.length,30);
+  assert.ok(b.app.state.heldItems);
+  assert.equal(b.nodes.get('display-count-widget').value,'30');
+  assert.equal(b.nodes.get('new-news').textContent,'새 뉴스 1개 · 최신으로 ↑');
+  assert.ok(!b.nodes.get('news-list').children.some(node=>node.dataset.key==='incoming'));
+  b.c.window.dispatchEvent({type:'storage',key,newValue:null});
+  assert.equal(b.nodes.get('news-list').children.length,5);
+  const fewer=await boot(fresh(),'?view=widget&limit=100',{maxItems:30});
+  assert.equal(fewer.nodes.get('display-count-widget').value,'30');
+  assert.equal(fewer.nodes.get('news-list').children.length,1);
+});
+
 test('reading hold buffers incoming news, retains its snapshot and exposes provider failure', async () => {
   const payload=fresh();
   const b=await boot(payload);
