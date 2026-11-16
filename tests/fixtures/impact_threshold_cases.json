@@ -1,0 +1,1738 @@
+{
+  "schema_version": 1,
+  "description": "Draft, synthetic policy boundary cases. Expected labels are provisional test hypotheses, not independently reviewed market truth. All cases are development data; there is no held-out accuracy claim.",
+  "cases": [
+    {
+      "id": "eps_tiny_up",
+      "group_id": "eps_tiny_up",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "반올림 수준의 차이를 호재로 표시할지 확인하는 개발 가설",
+      "item": {
+        "title": "Acme EPS $1.2001 vs $1.20 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.2001",
+            "expected": "1.20",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.2001 vs $1.20 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_tiny_down",
+      "group_id": "eps_tiny_down",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "반올림 수준의 차이를 악재로 표시할지 확인하는 개발 가설",
+      "item": {
+        "title": "Acme EPS $1.1999 vs $1.20 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.1999",
+            "expected": "1.20",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.1999 vs $1.20 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_equal",
+      "group_id": "eps_equal",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "예상 일치가 확인되고 다른 방향성 근거가 없음",
+      "item": {
+        "title": "Acme EPS $1.20 vs $1.20 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.20",
+            "expected": "1.20",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.20 vs $1.20 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_two_percent",
+      "group_id": "eps_two_percent",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "민감 후보와 중간 후보의 차이를 확인할 잠정 중립 사례",
+      "item": {
+        "title": "Acme EPS $1.02 vs $1.00 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.02",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.02 vs $1.00 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_below_five",
+      "group_id": "eps_below_five",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "5% 경계 바로 아래; 실제 중립의 시장 정답이 아니라 경계 테스트 가설",
+      "item": {
+        "title": "Acme EPS $1.049 vs $1.00 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.049",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.049 vs $1.00 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_at_five",
+      "group_id": "eps_at_five",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "5% 경계 포함 여부를 확인할 개발 가설",
+      "item": {
+        "title": "Acme EPS $1.05 vs $1.00 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.05",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.05 vs $1.00 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_above_five",
+      "group_id": "eps_above_five",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "5% 경계 바로 위를 확인할 개발 가설",
+      "item": {
+        "title": "Acme EPS $1.051 vs $1.00 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.051",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.051 vs $1.00 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_minus_five",
+      "group_id": "eps_minus_five",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "양방향 대칭 임계값 확인",
+      "item": {
+        "title": "Acme EPS $0.95 vs $1.00 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "0.95",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $0.95 vs $1.00 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_large_up",
+      "group_id": "eps_large_up",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "큰 폭 예상 상회",
+      "item": {
+        "title": "Acme EPS $1.50 vs $1.00 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.50",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.50 vs $1.00 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_large_down",
+      "group_id": "eps_large_down",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "큰 폭 예상 하회",
+      "item": {
+        "title": "Acme EPS $0.50 vs $1.00 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "0.50",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $0.50 vs $1.00 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_zero_tiny",
+      "group_id": "eps_zero_tiny",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "예상 EPS 0에서 상대 비율 대신 절대 차이 확인",
+      "item": {
+        "title": "Acme EPS $0.001 vs $0 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "0.001",
+            "expected": "0",
+            "unit": "USD_per_share",
+            "quote": "EPS $0.001 vs $0 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_zero_below_floor",
+      "group_id": "eps_zero_below_floor",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "2센트 절대 하한 바로 아래",
+      "item": {
+        "title": "Acme EPS $0.019 vs $0 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "0.019",
+            "expected": "0",
+            "unit": "USD_per_share",
+            "quote": "EPS $0.019 vs $0 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_zero_at_floor",
+      "group_id": "eps_zero_at_floor",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "2센트 절대 하한에 정확히 도달",
+      "item": {
+        "title": "Acme EPS $0.02 vs $0 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "0.02",
+            "expected": "0",
+            "unit": "USD_per_share",
+            "quote": "EPS $0.02 vs $0 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_zero_negative",
+      "group_id": "eps_zero_negative",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "예상 EPS 0에서 적자 발생; 절대 하한 적용",
+      "item": {
+        "title": "Acme EPS $-0.02 vs $0 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "-0.02",
+            "expected": "0",
+            "unit": "USD_per_share",
+            "quote": "EPS $-0.02 vs $0 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_near_zero",
+      "group_id": "eps_near_zero",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "900% 상회라도 차이는 0.009달러로 작음",
+      "item": {
+        "title": "Acme EPS $0.01 vs $0.001 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "0.01",
+            "expected": "0.001",
+            "unit": "USD_per_share",
+            "quote": "EPS $0.01 vs $0.001 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_loss_improves",
+      "group_id": "eps_loss_improves",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "예상보다 작은 적자는 긍정 방향",
+      "item": {
+        "title": "Acme EPS $-0.20 vs $-0.30 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "-0.20",
+            "expected": "-0.30",
+            "unit": "USD_per_share",
+            "quote": "EPS $-0.20 vs $-0.30 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_loss_worsens",
+      "group_id": "eps_loss_worsens",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "예상보다 큰 적자는 부정 방향",
+      "item": {
+        "title": "Acme EPS $-0.40 vs $-0.30 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "-0.40",
+            "expected": "-0.30",
+            "unit": "USD_per_share",
+            "quote": "EPS $-0.40 vs $-0.30 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eps_large_base_small_delta",
+      "group_id": "eps_large_base_small_delta",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "절대 차이와 상대 차이 기준 모두 충족해야 함",
+      "item": {
+        "title": "Acme EPS $10.02 vs $10.00 Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "10.02",
+            "expected": "10.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $10.02 vs $10.00 Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_tiny_up",
+      "group_id": "revenue_tiny_up",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "매출 0.01% 상회는 미미하다는 개발 가설",
+      "item": {
+        "title": "Acme Revenue $1000.1M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "1000100000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $1000.1M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_tiny_down",
+      "group_id": "revenue_tiny_down",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "매출 0.01% 하회는 미미하다는 개발 가설",
+      "item": {
+        "title": "Acme Revenue $999.9M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "999900000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $999.9M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_half_percent",
+      "group_id": "revenue_half_percent",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "0.5%와 1% 후보를 비교할 잠정 사례",
+      "item": {
+        "title": "Acme Revenue $1005M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "1005000000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $1005M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_below_one",
+      "group_id": "revenue_below_one",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "1% 경계 바로 아래",
+      "item": {
+        "title": "Acme Revenue $1009.9M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "1009900000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $1009.9M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_at_one",
+      "group_id": "revenue_at_one",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "1% 경계 포함 여부 확인",
+      "item": {
+        "title": "Acme Revenue $1010M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "1010000000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $1010M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_minus_one",
+      "group_id": "revenue_minus_one",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "매출 하회에도 동일한 기준 적용",
+      "item": {
+        "title": "Acme Revenue $990M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "990000000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $990M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_large_up",
+      "group_id": "revenue_large_up",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "매출 큰 폭 예상 상회",
+      "item": {
+        "title": "Acme Revenue $1200M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "1200000000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $1200M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_large_down",
+      "group_id": "revenue_large_down",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "매출 큰 폭 예상 하회",
+      "item": {
+        "title": "Acme Revenue $800M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "800000000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $800M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_equal",
+      "group_id": "revenue_equal",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "비교 가능한 예상 일치",
+      "item": {
+        "title": "Acme Revenue $1000M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "1000000000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $1000M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "revenue_zero_baseline",
+      "group_id": "revenue_zero_baseline",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "매출 예상 0은 이 상대비율 실험에서 제외",
+      "item": {
+        "title": "Acme Revenue $1M vs $0M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "revenue",
+            "actual": "1000000",
+            "expected": "0",
+            "unit": "USD",
+            "quote": "Revenue $1M vs $0M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_tiny_hot",
+      "group_id": "cpi_tiny_hot",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "0.01%p 차이; 상대 비율과 혼동하지 않음",
+      "item": {
+        "title": "U.S. CPI 3.01% vs 3.00% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "3.01",
+            "expected": "3.00",
+            "unit": "percentage_points",
+            "quote": "CPI 3.01% vs 3.00% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_tiny_cool",
+      "group_id": "cpi_tiny_cool",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "미세한 물가 하회를 자동 호재 처리하지 않음",
+      "item": {
+        "title": "U.S. CPI 2.99% vs 3.00% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "2.99",
+            "expected": "3.00",
+            "unit": "percentage_points",
+            "quote": "CPI 2.99% vs 3.00% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_half_tenth",
+      "group_id": "cpi_half_tenth",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "0.05%p와 0.1%p 후보 비교용 개발 가설",
+      "item": {
+        "title": "U.S. CPI 2.95% vs 3.00% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "2.95",
+            "expected": "3.00",
+            "unit": "percentage_points",
+            "quote": "CPI 2.95% vs 3.00% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_at_tenth_hot",
+      "group_id": "cpi_at_tenth_hot",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "0.1%p 경계; 할인율 경로만 검토하는 잠정 해석",
+      "item": {
+        "title": "U.S. CPI 3.10% vs 3.00% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "3.10",
+            "expected": "3.00",
+            "unit": "percentage_points",
+            "quote": "CPI 3.10% vs 3.00% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_at_tenth_cool",
+      "group_id": "cpi_at_tenth_cool",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "0.1%p 경계와 역방향 매핑 확인",
+      "item": {
+        "title": "U.S. CPI 2.90% vs 3.00% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "2.90",
+            "expected": "3.00",
+            "unit": "percentage_points",
+            "quote": "CPI 2.90% vs 3.00% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_large_hot",
+      "group_id": "cpi_large_hot",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "미국 주식에 대한 금리 경로의 부정 방향 가설",
+      "item": {
+        "title": "U.S. CPI 3.30% vs 3.00% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "3.30",
+            "expected": "3.00",
+            "unit": "percentage_points",
+            "quote": "CPI 3.30% vs 3.00% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_large_cool",
+      "group_id": "cpi_large_cool",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "미국 주식에 대한 금리 경로의 긍정 방향 가설",
+      "item": {
+        "title": "U.S. CPI 2.70% vs 3.00% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "2.70",
+            "expected": "3.00",
+            "unit": "percentage_points",
+            "quote": "CPI 2.70% vs 3.00% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_equal",
+      "group_id": "cpi_equal",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "예상 일치; 알려진 반대 근거 없음",
+      "item": {
+        "title": "U.S. CPI 3.00% vs 3.00% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "3.00",
+            "expected": "3.00",
+            "unit": "percentage_points",
+            "quote": "CPI 3.00% vs 3.00% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mixed_strong_both",
+      "group_id": "mixed_strong_both",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "mixed",
+      "rationale": "서로 상쇄하지 않고 유의미한 양쪽 근거 보존",
+      "item": {
+        "title": "Acme EPS $1.50 vs $1.00 Est; Revenue $800M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.50",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.50 vs $1.00 Est"
+          },
+          {
+            "kind": "revenue",
+            "actual": "800000000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $800M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "positive_with_tiny_negative",
+      "group_id": "positive_with_tiny_negative",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "매출 0.1% 미달 때문에 전체를 혼재로 바꿀지 비교",
+      "item": {
+        "title": "Acme EPS $1.50 vs $1.00 Est; Revenue $999M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.50",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.50 vs $1.00 Est"
+          },
+          {
+            "kind": "revenue",
+            "actual": "999000000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $999M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "negative_with_tiny_positive",
+      "group_id": "negative_with_tiny_positive",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "미미한 긍정 근거가 큰 부정 방향을 바꾸지 않음",
+      "item": {
+        "title": "Acme EPS $0.50 vs $1.00 Est; Revenue $1001M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "0.50",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $0.50 vs $1.00 Est"
+          },
+          {
+            "kind": "revenue",
+            "actual": "1001000000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $1001M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "neutral_small_both",
+      "group_id": "neutral_small_both",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "양쪽 모두 미미하면 혼재와 구분",
+      "item": {
+        "title": "Acme EPS $1.001 vs $1.00 Est; Revenue $999.9M vs $1000M Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "eps",
+            "actual": "1.001",
+            "expected": "1.00",
+            "unit": "USD_per_share",
+            "quote": "EPS $1.001 vs $1.00 Est"
+          },
+          {
+            "kind": "revenue",
+            "actual": "999900000",
+            "expected": "1000000000",
+            "unit": "USD",
+            "quote": "Revenue $999.9M vs $1000M Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_core_conflict",
+      "group_id": "cpi_core_conflict",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "mixed",
+      "rationale": "헤드라인 물가와 근원 물가 상반된 유의미한 차이",
+      "item": {
+        "title": "U.S. CPI 2.7% vs 3.0% Est; Core CPI 3.5% vs 3.2% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "2.7",
+            "expected": "3.0",
+            "unit": "percentage_points",
+            "quote": "CPI 2.7% vs 3.0% Est"
+          },
+          {
+            "kind": "inflation",
+            "actual": "3.5",
+            "expected": "3.2",
+            "unit": "percentage_points",
+            "quote": "Core CPI 3.5% vs 3.2% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cpi_tiny_core_conflict",
+      "group_id": "cpi_tiny_core_conflict",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "미미한 근원 물가 차이의 처리에 대한 개발 가설",
+      "item": {
+        "title": "U.S. CPI 2.7% vs 3.0% Est; Core CPI 3.21% vs 3.2% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": [
+          {
+            "kind": "inflation",
+            "actual": "2.7",
+            "expected": "3.0",
+            "unit": "percentage_points",
+            "quote": "CPI 2.7% vs 3.0% Est"
+          },
+          {
+            "kind": "inflation",
+            "actual": "3.21",
+            "expected": "3.2",
+            "unit": "percentage_points",
+            "quote": "Core CPI 3.21% vs 3.2% Est"
+          }
+        ]
+      }
+    },
+    {
+      "id": "buyback",
+      "group_id": "buyback",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "positive",
+      "rationale": "승인된 자사주 매입의 긍정 경로; 규모 임계값은 별도 연구",
+      "item": {
+        "title": "Acme Announces $1 Billion Share Repurchase Program",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": false,
+        "evidence": [
+          {
+            "kind": "event",
+            "direction": "positive",
+            "quote": "Acme Announces $1 Billion Share Repurchase Program"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bankruptcy",
+      "group_id": "bankruptcy",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "negative",
+      "rationale": "파산의 기존 주주 위험",
+      "item": {
+        "title": "Acme Files For Chapter 11 Bankruptcy",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": false,
+        "evidence": [
+          {
+            "kind": "event",
+            "direction": "negative",
+            "quote": "Acme Files For Chapter 11 Bankruptcy"
+          }
+        ]
+      }
+    },
+    {
+      "id": "guidance_conflict",
+      "group_id": "guidance_conflict",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "mixed",
+      "rationale": "실적과 전망의 명시적 상반 근거",
+      "item": {
+        "title": "Acme EPS Beats Estimates But Cuts FY Revenue Guidance",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": false,
+        "evidence": [
+          {
+            "kind": "event",
+            "direction": "positive",
+            "quote": "Acme EPS Beats Estimates But Cuts FY Revenue Guidance"
+          },
+          {
+            "kind": "event",
+            "direction": "negative",
+            "quote": "Acme EPS Beats Estimates But Cuts FY Revenue Guidance"
+          }
+        ]
+      }
+    },
+    {
+      "id": "macro_channels",
+      "group_id": "macro_channels",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "mixed",
+      "rationale": "성장과 금리 경로가 상충한다는 잠정 전문가 규칙",
+      "item": {
+        "title": "U.S. Nonfarm Payrolls Above Expectations",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": false,
+        "evidence": [
+          {
+            "kind": "event",
+            "direction": "positive",
+            "quote": "U.S. Nonfarm Payrolls Above Expectations"
+          },
+          {
+            "kind": "event",
+            "direction": "negative",
+            "quote": "U.S. Nonfarm Payrolls Above Expectations"
+          }
+        ]
+      }
+    },
+    {
+      "id": "unchanged_rating",
+      "group_id": "unchanged_rating",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "neutral",
+      "rationale": "평가와 목표가가 모두 유지된 사례를 중립 후보로 검토",
+      "item": {
+        "title": "Analyst Maintains Acme Buy Rating And Unchanged $100 Price Target",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": true,
+        "neutral_supported": true,
+        "evidence": []
+      }
+    },
+    {
+      "id": "missing_consensus",
+      "group_id": "missing_consensus",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "예상 비교 없이 중립으로 채우지 않음",
+      "item": {
+        "title": "Acme Reports Record Revenue, Profit Rises 40% YoY",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": false,
+        "neutral_supported": false,
+        "evidence": []
+      }
+    },
+    {
+      "id": "rumor",
+      "group_id": "rumor",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "확정되지 않은 사건",
+      "item": {
+        "title": "Acme May Raise EPS Guidance",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": false,
+        "neutral_supported": false,
+        "evidence": []
+      }
+    },
+    {
+      "id": "denial",
+      "group_id": "denial",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "부인을 실제 파산 사건으로 오인하지 않음",
+      "item": {
+        "title": "Acme Denies Bankruptcy Report",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": false,
+        "neutral_supported": false,
+        "evidence": []
+      }
+    },
+    {
+      "id": "multiple_targets",
+      "group_id": "multiple_targets",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "기업별 귀속 불명확",
+      "item": {
+        "title": "Acme And Peer Report Earnings",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          },
+          {
+            "symbol": "PEER"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": false,
+        "neutral_supported": false,
+        "evidence": []
+      }
+    },
+    {
+      "id": "no_target",
+      "group_id": "no_target",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "종목 확인 불가",
+      "item": {
+        "title": "Company EPS Beats Estimates",
+        "snippet": "",
+        "entities": []
+      },
+      "annotation": {
+        "eligible": false,
+        "neutral_supported": false,
+        "evidence": []
+      }
+    },
+    {
+      "id": "price_only",
+      "group_id": "price_only",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "관측 가격 하락은 새 악재의 근거로 사용하지 않음",
+      "item": {
+        "title": "Acme Shares Drop 8%",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": false,
+        "neutral_supported": false,
+        "evidence": []
+      }
+    },
+    {
+      "id": "promotion",
+      "group_id": "promotion",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "할인 단어를 부정으로 해석하지 않음",
+      "item": {
+        "title": "Amazon Announces Daily Drops Up To 60% Off",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "AMZN"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": false,
+        "neutral_supported": false,
+        "evidence": []
+      }
+    },
+    {
+      "id": "stale",
+      "group_id": "stale",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "과거 사건을 새 정보로 해석하지 않음",
+      "item": {
+        "title": "Acme Raised EPS Guidance Last Year",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "ACME"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": false,
+        "neutral_supported": false,
+        "evidence": []
+      }
+    },
+    {
+      "id": "foreign_cpi",
+      "group_id": "foreign_cpi",
+      "split": "development",
+      "origin": "synthetic",
+      "label_status": "draft",
+      "expected": "unknown",
+      "rationale": "다른 나라 지표를 미국 증시에 바로 연결하지 않음",
+      "item": {
+        "title": "China CPI 2.7% vs 3.0% Est",
+        "snippet": "",
+        "entities": [
+          {
+            "symbol": "SPY"
+          },
+          {
+            "symbol": "QQQ"
+          }
+        ]
+      },
+      "annotation": {
+        "eligible": false,
+        "neutral_supported": false,
+        "evidence": []
+      }
+    }
+  ]
+}

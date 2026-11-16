@@ -1,0 +1,4 @@
+# Preserve upstream font files and licenses byte-for-byte on Windows too.
+fonts/*.woff2 binary
+fonts/*.ttf binary
+fonts/*-LICENSE.txt -text -whitespace

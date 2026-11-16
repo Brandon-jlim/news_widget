@@ -139,7 +139,7 @@ test('pending translation displays original then updates without replacing uncha
   payload.items[0] = {...headline, titleKo:'', translationStatus:'pending'};
   const b = await boot(payload);
   assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].textContent, headline.title);
-  assert.ok(b.nodes.get('news-list').querySelectorAll('.meta-chip').some(x => x.textContent === '번역 중'));
+  assert.ok(b.nodes.get('news-list').querySelectorAll('.news-card__notice').some(x => x.textContent.includes('번역 중')));
   const card = b.nodes.get('news-list').children[0];
   await b.app.refreshNews();
   assert.equal(b.nodes.get('news-list').children[0], card);
@@ -361,7 +361,8 @@ test('clock choices persist independently and update held articles without fetch
   assert.equal(b.nodes.get('clock-right-name').textContent, '로스앤젤레스');
   assert.equal(b.nodes.get('footer-zone').textContent, '런던');
   assert.match(b.nodes.get('footer-text').textContent, /02:03/);
-  assert.match(b.nodes.get('news-list').querySelectorAll('.news-card__publication')[0].textContent, /01\.01 02:03 GMT · 12\.31 18:03 PST/);
+  assert.match(b.nodes.get('news-list').querySelectorAll('.meta-chip--time')[0].title, /01\.01 02:03 GMT · 12\.31 18:03 PST/);
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__publication')[0].textContent,'발행 01.01 02:03 GMT');
   assert.match(b.nodes.get('news-list').querySelectorAll('.meta-chip--time')[0].title, /런던.*로스앤젤레스/);
   assert.equal(b.app.state.heldItems, held);
   assert.equal(requests, 0);
@@ -459,7 +460,7 @@ test('type filtering and pinned snapshots preserve editorial classifications', a
   payload.items=[];
   await b.app.refreshNews();
   assert.equal(b.nodes.get('news-list').children[0].dataset.newsType,'breaking');
-  assert.match(b.nodes.get('news-list').querySelectorAll('.news-card__publication')[0].textContent,/KST/);
+  assert.match(b.nodes.get('news-list').querySelectorAll('.meta-chip--time')[0].title,/KST/);
   b.nodes.get('news-type').value='economic';
   b.nodes.get('news-type').events.change();
   assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title')[0].textContent,'검색 결과가 없습니다');
@@ -481,7 +482,7 @@ test('old public feeds show the original with a review label when translation is
   const b=await boot({...fresh(),items:[{...headline,title:'Acme earnings',titleKo:'애크姆 실적',translationStatus:'cached'}]});
   assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__title-link')[0].textContent,'Acme earnings');
   assert.equal(b.status(),'번역 확인 필요 · 원문 표시');
-  assert.ok(b.nodes.get('news-list').querySelectorAll('.meta-chip').some(x=>x.textContent==='번역 확인 · 원문'));
+  assert.ok(b.nodes.get('news-list').querySelectorAll('.news-card__notice').some(x=>x.textContent.includes('번역 확인 · 원문')));
 });
 
 test('old pinned translations are checked on restore without deleting the pin', async () => {
@@ -493,38 +494,124 @@ test('old pinned translations are checked on restore without deleting the pin', 
   assert.equal(b.app.state.pinnedEntries[0].item.translationStatus,'review');
 });
 
-test('impact estimates show direction, affected target and reasoning, including mixed evidence', async () => {
-  for (const [index,label] of ['호재 예상','악재 예상','영향 혼재','악재 예상'].entries()) {
-    const item={...impactExamples[index],publishedAt:new Date().toISOString()};
+test('cards show metadata, full-width headline and publication as three rows', async () => {
+  for (const [index,label] of ['▲ 호재','▼ 악재','↕ 혼재','▼ 악재','− 중립'].entries()) {
+    const item={...impactExamples[index],source:'Benzinga',channels:['earnings'],publishedAt:new Date().toISOString()};
     const b=await boot({...fresh(),items:[item]});
-    const chips=b.nodes.get('news-list').querySelectorAll('.meta-chip');
+    const chips=b.nodes.get('news-list').querySelectorAll('.sentiment-badge');
     const chip=chips.find(x=>x.textContent===label);
     assert.ok(chip);
+    const row=b.nodes.get('news-list').querySelectorAll('.news-card__meta')[0];
+    assert.equal(row.children[0],chip);
+    assert.ok(row.children[1].className.includes('meta-chip--type'));
+    assert.ok(row.children[2].className.includes('meta-chip--time'));
+    assert.equal(row.children.length,3);
+    const card=b.nodes.get('news-list').children[0];
+    assert.ok(card.children[card.children.indexOf(row)+1].className.includes('news-card__title'));
+    assert.equal(chip.tabIndex,0);
+    assert.ok(chip.attributes['aria-label'].includes(item.marketImpact.reason));
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__publication').length,1);
+    assert.match(card.children[card.children.indexOf(row)+2].className,/news-card__footer/);
+    assert.match(b.nodes.get('news-list').querySelectorAll('.news-card__publication')[0].textContent,/^발행 \d{2}\.\d{2} \d{2}:\d{2} KST$/);
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__impact').length,0);
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.meta-chip--source').length,0);
+    assert.match(row.children[2].title,/출처: Benzinga/);
+    assert.equal(row.children[2].attributes['aria-label'],row.children[2].title);
     assert.match(chip.title,/실제 가격 반응 미확인/);
-    const reason=b.nodes.get('news-list').querySelectorAll('.news-card__impact')[0];
-    assert.match(reason.textContent,index===3 ? /미국 증시/ : /ACME/);
-    assert.ok(reason.textContent.includes(item.marketImpact.reason));
+    assert.match(chip.title,index===3 ? /미국 증시/ : /ACME/);
+    assert.ok(chip.title.includes(item.marketImpact.reason));
   }
+});
+
+test('topic categories are visible after news type and survive pinning', async () => {
+  for(const category of ['지정학','물가','지수']) {
+    const item={...impactExamples[0],category,channels:['macro economic events'],publishedAt:new Date().toISOString()};
+    const b=await boot({...fresh(),items:[item]});
+    const meta=b.nodes.get('news-list').querySelectorAll('.news-card__meta')[0];
+    assert.equal(meta.children.length,4);
+    assert.ok(meta.children[0].className.includes('sentiment-badge'));
+    assert.equal(meta.children[1].textContent,'경제지표');
+    assert.equal(meta.children[2].textContent,category);
+    assert.ok(meta.children[3].className.includes('meta-chip--time'));
+    b.app.togglePin(b.app.state.items[0]);
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.meta-chip--topic')[0].textContent,category);
+  }
+});
+
+test('elapsed labels stay relative while exact, date-only and future timestamps remain distinct', async () => {
+  const now=Date.now();
+  const cases=[
+    [{publishedAt:new Date(now-20_000).toISOString()},'방금 전'],
+    [{publishedAt:new Date(now-7.5*60_000).toISOString()},'7분 전'],
+    [{publishedAt:new Date(now-2.5*3600_000).toISOString()},'2시간 전'],
+    [{publishedAt:new Date(now-4.5*86400_000).toISOString()},'4일 전'],
+    [{publishedAt:new Date(now+5*60_000).toISOString()},'발행 시각 확인'],
+    [{publishedAt:null,publishedDate:'2026-11-16'},'시각 미제공'],
+    [{publishedAt:null},'시간 미상'],
+  ];
+  for(const [times,label] of cases) {
+    const b=await boot({...fresh(),items:[{...headline,...times}]});
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.meta-chip--time')[0].textContent,label);
+    const publication=b.nodes.get('news-list').querySelectorAll('.news-card__publication')[0];
+    assert.match(publication.textContent,/^발행 /);
+    if(label==='시각 미제공')assert.equal(publication.textContent,'발행 2026-11-16 · 시각 미제공');
+    if(label==='시간 미상')assert.equal(publication.textContent,'발행 시각 미제공');
+  }
+});
+
+test('elapsed time advances while reading is held without changing the original publication', async () => {
+  const now=Date.now();
+  const b=await boot({...fresh(),items:[{...headline,publishedAt:new Date(now-7.5*60_000).toISOString()}]});
+  b.nodes.get('pause-toggle').events.click();
+  const publication=b.nodes.get('news-list').querySelectorAll('.news-card__publication')[0].textContent;
+  b.c.Date=class extends Date {static now(){return now+2*60_000;}};
+  await b.app.refreshNews();
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.meta-chip--time')[0].textContent,'9분 전');
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__publication')[0].textContent,publication);
+});
+
+test('unclassified cards omit the sentiment slot and keep translation notices outside metadata', async () => {
+  const b=await boot({...fresh(),items:[{...headline,source:'Benzinga',translationStatus:'pending'}]});
+  const row=b.nodes.get('news-list').querySelectorAll('.news-card__meta')[0];
+  assert.equal(row.children.length,2);
+  assert.ok(row.children[0].className.includes('meta-chip--type'));
+  assert.ok(row.children[1].className.includes('meta-chip--time'));
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.news-card__notice')[0].textContent,'번역 중');
 });
 
 test('legacy sentiment, stale assessment and ungrounded directional data never create a badge', async () => {
   const valid=impactExamples[0];
-  for(const marketImpact of [undefined,{...valid.marketImpact,version:0},{...valid.marketImpact,evidence:[]},
+  for(const marketImpact of [undefined,{...valid.marketImpact,version:1},{...valid.marketImpact,policy:'old'},
+    {...valid.marketImpact,direction:'unknown'},{...valid.marketImpact,evidence:[]},
     {...valid.marketImpact,scope:'company',targets:[]},{...valid.marketImpact,basisTitle:'different headline'}]) {
     const b=await boot({...fresh(),items:[{...valid,marketImpact,sentiment:'positive'}]});
-    assert.equal(b.nodes.get('news-list').querySelectorAll('.meta-chip--sentiment').length,0);
+    assert.equal(b.nodes.get('news-list').querySelectorAll('.sentiment-badge').length,0);
   }
   const b=await boot({...fresh(),items:[{...headline,title:'Amazon Daily Drops Up To 60% Off',sentiment:'negative'}]});
-  assert.equal(b.nodes.get('news-list').querySelectorAll('.meta-chip--sentiment').length,0);
+  assert.equal(b.nodes.get('news-list').querySelectorAll('.sentiment-badge').length,0);
 });
 
 test('saved pins retain explained estimates but discard obsolete word-score labels', async () => {
   for(const item of [{...impactExamples[0],originalTitle:impactExamples[0].title}, {...headline,sentiment:'negative'}]) {
     const saved={'news-overlay-widget.pins.v1.combined':JSON.stringify([{key:`id:${item.id}`,pinnedAt:Date.now(),item}])};
     const b=await boot({...fresh(),items:[]},'',{},undefined,saved);
-    const chips=b.nodes.get('news-list').querySelectorAll('.meta-chip--sentiment');
+    const chips=b.nodes.get('news-list').querySelectorAll('.sentiment-badge');
     assert.equal(chips.length,item.marketImpact?1:0);
   }
+});
+
+test('sentiment badges are disabled together with reasons and never open the article', async () => {
+  const item={...impactExamples[4],url:'https://example.test/neutral'};
+  const b=await boot({...fresh(),items:[item]});
+  const badge=b.nodes.get('news-list').querySelectorAll('.sentiment-badge')[0];
+  let stopped=0;
+  badge.events.click({stopPropagation(){stopped++;}});
+  badge.events.keydown({key:'Enter',stopPropagation(){stopped++;}});
+  assert.equal(stopped,2);
+  assert.equal(b.c.readerItem,undefined);
+  const off=await boot({...fresh(),items:[item]},'',{sentiment:{enabled:false}});
+  assert.equal(off.nodes.get('news-list').querySelectorAll('.sentiment-badge').length,0);
+  assert.equal(off.nodes.get('news-list').querySelectorAll('.news-card__impact').length,0);
 });
 
 const benzingaStory = {

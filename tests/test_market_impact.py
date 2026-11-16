@@ -19,20 +19,21 @@ class MarketImpactTests(unittest.TestCase):
             ('Acme Launches New Products This Fall', 'unknown'),
             ('Acme Wins Design Award, Rewards Customers With Discounts', 'unknown'),
             ('Acme Shares Drop 8% As Investors Sell', 'unknown'),
-            ('Acme Q3 EPS $1.42 Beats $1.39 Estimate, Sales $570.165M Beat $565.982M Estimate', 'positive'),
-            ('Acme Q3 EPS $0.16 Misses $0.25 Estimate, Sales $22.738B Beat $22.629B Estimate', 'mixed'),
+            ('Acme Q3 EPS $1.42 Beats $1.39 Estimate, Sales $570.165M Beat $565.982M Estimate', 'neutral'),
+            ('Acme Q3 EPS $0.16 Misses $0.25 Estimate, Sales $22.738B Beat $22.629B Estimate', 'negative'),
             ('Sanmina Surges 20% After-Hours as Q4 Earnings Beat Estimates, Fiscal Q1 Outlook Tops Expectations', 'positive'),
             ('Acme EPS Beats Estimates But Cuts FY2027 Revenue Guidance', 'mixed'),
             ('Acme Reports Record Revenue, Profit Rises 40% Year Over Year', 'unknown'),
-            ('Acme Reports EPS In Line With Estimates', 'unknown'),
+            ('Acme Reports EPS In Line With Estimates', 'neutral'),
             ('Acme Q3 EPS $1.50 vs $1.20 Est', 'positive'),
             ('Acme Q3 EPS $1.10 vs $1.20 Est', 'negative'),
-            ('Acme Q3 EPS $1.20 vs $1.20 Est', 'unknown'),
+            ('Acme Q3 EPS $1.20 vs $1.20 Est', 'neutral'),
             ('Acme Q3 EPS ($0.20) vs ($0.30) Est', 'positive'),
             ('Acme Q3 EPS ($0.40) vs ($0.30) Est', 'negative'),
             ('Acme Q3 Revenue $0.9B vs $950M Est', 'negative'),
             ('Acme Sees FY EPS $2.0-$2.4 vs $2.2 Est', 'unknown'),
-            ('Acme Sees FY EPS $2.3-$2.4 vs $2.2 Est', 'positive'),
+            ('Acme Sees FY EPS $2.3-$2.4 vs $2.2 Est', 'unknown'),
+            ('Acme Sees FY EPS $2.4-$2.5 vs $2.2 Est', 'positive'),
             ('Acme Sees FY EPS $1.8-$2.0 vs $2.2 Est', 'negative'),
             ('Acme Raises FY2027 EPS Guidance', 'positive'),
             ('Acme Lowers Full Year Revenue Outlook', 'negative'),
@@ -78,7 +79,7 @@ class MarketImpactTests(unittest.TestCase):
         cases = [
             ('U.S. CPI 2.8% vs 3.0% Est', 'positive'),
             ('U.S. CPI 3.2% vs 3.0% Est', 'negative'),
-            ('U.S. CPI 3.0% vs 3.0% Est', 'unknown'),
+            ('U.S. CPI 3.0% vs 3.0% Est', 'neutral'),
             ('U.S. May CPI 2.8% vs 3.0% Est', 'positive'),
             ('U.S. CPI Falls To 3.0% From 3.5%', 'unknown'),
             ('U.S. Core PCE Above Expectations', 'negative'),
@@ -135,6 +136,57 @@ class MarketImpactTests(unittest.TestCase):
         item['sentiment'] = 'negative'
         self.assertEqual(attach_impact(item)['sentiment'], 'neutral')
         self.assertEqual(attach_impact(item)['marketImpact']['direction'], 'unknown')
+
+    def test_thresholds_apply_to_text_extraction_and_mixed_requires_material_evidence(self):
+        cases = [
+            ('Acme EPS $1.049 vs $1.00 Est', 'neutral'),
+            ('Acme EPS $1.05 vs $1.00 Est', 'positive'),
+            ('Acme EPS $0.95 vs $1.00 Est', 'negative'),
+            ('Acme EPS $0.019 vs $0 Est', 'neutral'),
+            ('Acme EPS $0.02 vs $0 Est', 'positive'),
+            ('Acme EPS $-0.02 vs $0 Est', 'negative'),
+            ('Acme EPS $(0.20) vs $(0.30) Est', 'positive'),
+            ('Acme EPS $1.50 vs $1.00 Est; Revenue $999M vs $1000M Est', 'positive'),
+            ('Acme EPS $1.001 vs $1.00 Est; Revenue $999.9M vs $1000M Est', 'neutral'),
+            ('Acme EPS $1.50 vs $1.00 Est; Revenue $900M vs $1000M Est', 'mixed'),
+            ('Acme Revenue $1B vs $1000M Est', 'neutral'),
+            ('Acme Revenue $1M vs $0 Est', 'unknown'),
+            ('U.S. CPI 3.01% vs 3.00% Est', 'neutral'),
+            ('U.S. CPI 3.10% vs 3.00% Est', 'negative'),
+            ('U.S. CPI 2.90% vs 3.00% Est', 'positive'),
+            ('U.S. CPI 2.7% vs 3.0% Est; Core CPI 3.21% vs 3.2% Est', 'positive'),
+        ]
+        for title, expected in cases:
+            with self.subTest(title=title):
+                result = assess_impact(story(title))
+                self.assertEqual(result['direction'], expected)
+                self.assertEqual(result['version'], 2)
+                self.assertEqual(result['policy'], 'balanced-v1')
+
+    def test_neutral_requires_complete_comparisons_not_missing_context(self):
+        for title in [
+            'Acme EPS $1.00 vs $1.00 Est; Revenue Rises 20% YoY',
+            'Acme EPS $1.00 vs $1.00 Est; CEO Resigns',
+            'Acme EPS $1.00 vs $1.00 Est, CEO Resigns',
+            'Acme EPS $1.00 vs $1.00 Est But Faces Investigation',
+            'Acme EPS 1.00 vs 1.00 Est',  # Dollar floor needs a dollar EPS.
+            'Acme EPS €1.01 Beats €1.00 Estimate',
+            'Acme EPS ¥100 vs ¥99 Est',
+            'Acme EPS $1.00 vs 100% Est',
+            'Acme EPS $1.20) vs $1.00 Est',
+            'U.S. CPI 3.00% vs 3.00% Est; Core CPI Rises',
+            'U.S. CPI 3.00% vs 3.00% Est; Banking Crisis Worsens',
+        ]:
+            with self.subTest(title=title):
+                self.assertEqual(assess_impact(story(title))['direction'], 'unknown')
+
+    def test_summary_cannot_reinflate_weak_numeric_surprise_but_new_guidance_counts(self):
+        item = story('Acme EPS $1.01 vs $1.00 Est', snippet='Acme EPS beats estimates.')
+        self.assertEqual(assess_impact(item)['direction'], 'neutral')
+        item['snippet'] = 'Acme EPS $0.80 vs $1.00 Est'
+        self.assertEqual(assess_impact(item)['direction'], 'unknown')
+        item['snippet'] = 'Acme lowers FY revenue guidance.'
+        self.assertEqual(assess_impact(item)['direction'], 'negative')
 
     def test_browser_examples_are_real_classifier_output(self):
         for item in json.loads(Path(__file__).with_name('market_impact_examples.json').read_text(encoding='utf-8')):

@@ -4,9 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Market Brief · 미국 증시 뉴스</title>
+    <link rel="stylesheet" href="fonts/fonts.css" />
     <link rel="stylesheet" href="styles.css" />
     <script defer src="js/config.js"></script>
     <script defer src="js/appearance.js"></script>
+    <script defer src="js/typography.js"></script>
     <script defer src="widget-runtime.js"></script>
     <script defer src="js/market-ticker.js"></script>
     <script defer src="js/translation-quality.js"></script>
@@ -28,7 +30,7 @@
               <button id="view-widget" type="button" aria-pressed="false">위젯</button>
               <button id="view-panel" type="button" aria-pressed="true">패널</button>
             </div>
-            <button class="settings-open" id="settings-open" type="button" aria-haspopup="dialog" aria-controls="appearance-settings" title="표시 개수·시간대·테마 설정">설정</button>
+            <button class="settings-open" id="settings-open" type="button" aria-haspopup="dialog" aria-controls="appearance-settings" title="글꼴·표시 개수·시간대·테마 설정">설정</button>
           </div>
         </div>
         <header class="widget-header">
@@ -148,7 +150,29 @@
         <h2 id="settings-title">화면 설정</h2>
         <button class="settings-close" id="settings-close" type="button" aria-label="설정 닫기">×</button>
       </div>
-      <p class="settings-description" id="settings-description">뉴스 표시 개수와 시간대, 테마를 설정합니다.</p>
+      <p class="settings-description" id="settings-description">글꼴, 뉴스 표시 개수와 시간대, 테마를 설정합니다.</p>
+      <fieldset class="settings-group">
+        <legend>글꼴</legend>
+        <label class="settings-font" for="font-news"><span>뉴스·화면</span><select id="font-news" aria-describedby="font-settings-hint">
+          <option value="pretendard">Pretendard · 기본 / 추천</option>
+          <option value="noto">Noto Sans KR · 정돈된 고딕</option>
+          <option value="system">기기 기본 글꼴</option>
+        </select></label>
+        <label class="settings-font" for="font-clock"><span>시계 숫자</span><select id="font-clock" aria-describedby="font-settings-hint">
+          <option value="inter">Inter · 기본 / 추천</option>
+          <option value="plex">IBM Plex Mono · 고정폭</option>
+          <option value="news">뉴스 글꼴과 동일</option>
+        </select></label>
+        <div class="font-preview" aria-label="선택한 글꼴 미리보기">
+          <span class="font-preview__label">글꼴 미리보기</span>
+          <p class="font-preview__headline">시장의 흐름을 한눈에</p>
+          <p class="font-preview__caption">Market Brief · 한글 뉴스</p>
+          <span class="font-preview__clock">09:41:08</span>
+        </div>
+        <p class="settings-hint" id="font-settings-hint">뉴스와 시계 글꼴을 각각 선택할 수 있습니다.</p>
+        <button class="text-btn font-reset" id="font-reset" type="button">추천 글꼴로 복원</button>
+        <p class="settings-hint" id="font-save-status" role="status">변경하면 이 브라우저에 자동 저장됩니다.</p>
+      </fieldset>
       <fieldset class="settings-group">
         <legend>뉴스 표시 개수</legend>
         <label class="settings-news-count" for="display-count-widget"><span>작은 위젯</span><select id="display-count-widget" aria-describedby="display-count-hint"></select></label>

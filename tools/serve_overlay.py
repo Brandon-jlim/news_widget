@@ -24,7 +24,9 @@ except ImportError:
 
 PROJECT_ROOT = RESOURCE_ROOT
 ASSETS = ("index.html", "styles.css", "js/config.js", "js/appearance.js", "js/market-ticker.js", "js/translation-quality.js", "js/market-impact.js", "js/article-links.js", "js/news-source.js", "js/news-context.js", "js/feed-health.js", "js/app.js")
-ASSETS += ("js/article-reader.js",)
+ASSETS += ("js/article-reader.js", "js/typography.js", "fonts/fonts.css",
+           "fonts/PretendardVariable.woff2", "fonts/NotoSansKR-VF.ttf",
+           "fonts/InterVariable.woff2", "fonts/IBMPlexMono-Medium.woff2")
 
 
 def regular_file(path: Path) -> bool:

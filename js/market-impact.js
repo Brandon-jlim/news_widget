@@ -3,8 +3,8 @@
   function read(item) {
     const impact = item?.marketImpact;
     const original = String(item?.originalTitle || item?.title || '').replace(/\s+/g, ' ').trim();
-    if (!impact || impact.version !== 1 || impact.method !== 'event_rules' || impact.basisTitle !== original ||
-        !['positive', 'negative', 'mixed'].includes(impact.direction) ||
+    if (!impact || impact.version !== 2 || impact.method !== 'event_rules' || impact.policy !== 'balanced-v1' || impact.basisTitle !== original ||
+        !['positive', 'negative', 'mixed', 'neutral'].includes(impact.direction) ||
         !['company', 'us_equities'].includes(impact.scope) ||
         !Array.isArray(impact.evidence) || !impact.evidence.length ||
         !impact.evidence.every(e => typeof e.quote === 'string' && e.quote && typeof e.reason === 'string' && e.reason) ||
@@ -18,8 +18,9 @@
     const impact = read(item);
     if (!impact) return null;
     const target = impact.scope === 'us_equities' ? '미국 증시' : impact.targets[0];
-    const label = {positive:'호재 예상', negative:'악재 예상', mixed:'영향 혼재'}[impact.direction];
-    return {impact, label, summary:`${target} · ${impact.reason}`,
+    const label = {positive:'호재 예상', negative:'악재 예상', mixed:'영향 혼재', neutral:'중립'}[impact.direction];
+    const badge = {positive:'▲ 호재', negative:'▼ 악재', mixed:'↕ 혼재', neutral:'− 중립'}[impact.direction];
+    return {impact, label, badge, summary:`${target} · ${impact.reason}`,
       detail:`${target} · ${label}\n${impact.reason}\n근거: ${impact.evidence.map(e=>e.quote).join(' / ')}\n${impact.caveat}`};
   }
   window.NewsMarketImpact = {read, describe};

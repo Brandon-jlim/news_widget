@@ -74,12 +74,14 @@
       const {left, right} = clocks(item.publishedAt);
       if (left && right) return {
         exact: true,
+        primaryText: `발행 ${left.date} ${left.hour}:${left.minute} ${left.timeZoneName}`,
         text: `발행 ${left.date} ${left.hour}:${left.minute} ${left.timeZoneName} · ${right.date} ${right.hour}:${right.minute} ${right.timeZoneName}`,
         detail: `${left.name} ${left.year}.${left.date} ${left.time} ${left.timeZoneName} / ${right.name} ${right.year}.${right.date} ${right.time} ${right.timeZoneName}`,
       };
     }
     const day = String(item.publishedDate || '').match(/^\d{4}-\d{2}-\d{2}$/)?.[0];
-    return {exact: false, text: day ? `발행 ${day} · 시각 미제공` : '발행 시각 미제공', detail: '공급자가 정확한 발행 시각을 제공하지 않았습니다.'};
+    const text = day ? `발행 ${day} · 시각 미제공` : '발행 시각 미제공';
+    return {exact: false, primaryText: text, text, detail: '공급자가 정확한 발행 시각을 제공하지 않았습니다.'};
   }
 
   function classify(item) {

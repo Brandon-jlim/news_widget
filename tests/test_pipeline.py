@@ -23,6 +23,10 @@ class PipelineTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        # parse_args derives the publication cutoff; freeze before parsing too.
+        self.now = datetime(2026, 11, 10, 0, 0, tzinfo=timezone.utc)
+        self.clock = patch.object(relay, "now_utc", return_value=self.now).start()
+        self.addCleanup(patch.stopall)
         with patch.object(relay, "PROJECT_ROOT", self.root), patch.object(sys, "argv", ["test"]), \
              patch.object(relay, "first_existing_secret", return_value=("", "")), patch.dict(relay.os.environ, {}, clear=True):
             self.args = relay.parse_args()
@@ -39,9 +43,6 @@ class PipelineTests(unittest.TestCase):
         self.args.request_retries = 0
         self.args.file_marketaux_api_token = "fixture"
         self.args.file_deepl_api_key = "fixture"
-        self.now = datetime(2026, 11, 10, 0, 0, tzinfo=timezone.utc)
-        self.clock = patch.object(relay, "now_utc", return_value=self.now).start()
-        self.addCleanup(patch.stopall)
         self.item = {"id": "m", "url": "https://example.test/market", "title": "Fed cuts rates", "publishedAt": self.now.isoformat(), "_score": 20}
         self.provider = Mock()
         self.provider.fetch.return_value = relay.ProviderResult([self.item], {"usage": {"daily_limit": "100", "daily_remaining": "99"}})
@@ -234,6 +235,42 @@ class PipelineTests(unittest.TestCase):
 
 
 class ServerTests(unittest.TestCase):
+    def test_bundled_fonts_are_served_with_correct_types_and_exact_routes(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            server = serve_overlay.build_server("127.0.0.1", 0, root, {}, {}, cache_root=Path(directory))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                assets = {
+                    "PretendardVariable.woff2": ("font/woff2", b"wOF2"),
+                    "NotoSansKR-VF.ttf": ("font/ttf", b"\x00\x01\x00\x00"),
+                    "InterVariable.woff2": ("font/woff2", b"wOF2"),
+                    "IBMPlexMono-Medium.woff2": ("font/woff2", b"wOF2"),
+                }
+                for name, (mime, signature) in assets.items():
+                    with self.subTest(font=name):
+                        conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+                        conn.request("GET", "/fonts/" + name)
+                        response = conn.getresponse()
+                        self.assertEqual(response.status, 200)
+                        self.assertEqual(response.getheader("Content-Type"), mime)
+                        self.assertTrue(response.read().startswith(signature))
+                        conn.close()
+                for route, expected in [("/fonts/fonts.css", 200), ("/js/typography.js", 200),
+                                        ("/fonts/", 404), ("/fonts/sources.json", 404),
+                                        ("/fonts/../keys/massive_api_key.txt", 404)]:
+                    conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+                    conn.request("GET", route)
+                    response = conn.getresponse()
+                    self.assertEqual(response.status, expected, route)
+                    response.read()
+                    conn.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     def test_only_public_assets_and_explicit_feeds_are_served(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

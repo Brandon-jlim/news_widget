@@ -8,8 +8,9 @@
       }
     ],
     "marketImpact": {
-      "version": 1,
+      "version": 2,
       "method": "event_rules",
+      "policy": "balanced-v1",
       "basisTitle": "Acme EPS Beats Estimates",
       "direction": "positive",
       "scope": "company",
@@ -23,7 +24,9 @@
           "direction": "positive",
           "scope": "company",
           "reason": "EPS 예상 상회 → 수익 기대 개선 가능",
-          "quote": "EPS Beats Estimates"
+          "quote": "EPS Beats Estimates",
+          "metric": "earnings_eps",
+          "basis": "text"
         }
       ],
       "caveat": "기사에 근거한 단기 영향 추정 · 선반영·실제 가격 반응 미확인"
@@ -38,8 +41,9 @@
       }
     ],
     "marketImpact": {
-      "version": 1,
+      "version": 2,
       "method": "event_rules",
+      "policy": "balanced-v1",
       "basisTitle": "Acme EPS Misses Estimates",
       "direction": "negative",
       "scope": "company",
@@ -53,7 +57,9 @@
           "direction": "negative",
           "scope": "company",
           "reason": "EPS 예상 하회 → 수익 기대 부담 가능",
-          "quote": "EPS Misses Estimates"
+          "quote": "EPS Misses Estimates",
+          "metric": "earnings_eps",
+          "basis": "text"
         }
       ],
       "caveat": "기사에 근거한 단기 영향 추정 · 선반영·실제 가격 반응 미확인"
@@ -68,8 +74,9 @@
       }
     ],
     "marketImpact": {
-      "version": 1,
+      "version": 2,
       "method": "event_rules",
+      "policy": "balanced-v1",
       "basisTitle": "Acme EPS Beats Estimates But Cuts FY2027 Revenue Guidance",
       "direction": "mixed",
       "scope": "company",
@@ -83,14 +90,18 @@
           "direction": "positive",
           "scope": "company",
           "reason": "EPS 예상 상회 → 수익 기대 개선 가능",
-          "quote": "EPS Beats Estimates But Cuts FY2027"
+          "quote": "EPS Beats Estimates But Cuts FY2027",
+          "metric": "earnings_eps",
+          "basis": "text"
         },
         {
           "rule": "guidance_down",
           "direction": "negative",
           "scope": "company",
           "reason": "실적 전망 하향 → 예상 이익·매출 부담",
-          "quote": "Cuts FY2027 Revenue Guidance"
+          "quote": "Cuts FY2027 Revenue Guidance",
+          "metric": "",
+          "basis": "event"
         }
       ],
       "caveat": "기사에 근거한 단기 영향 추정 · 선반영·실제 가격 반응 미확인"
@@ -105,8 +116,9 @@
       }
     ],
     "marketImpact": {
-      "version": 1,
+      "version": 2,
       "method": "event_rules",
+      "policy": "balanced-v1",
       "basisTitle": "U.S. CPI 3.2% vs 3.0% Est",
       "direction": "negative",
       "scope": "us_equities",
@@ -118,7 +130,42 @@
           "direction": "negative",
           "scope": "us_equities",
           "reason": "미 물가 예상 상회 → 긴축·할인율 부담 확대 가능",
-          "quote": "U.S. CPI 3.2% vs 3.0% Est"
+          "quote": "U.S. CPI 3.2% vs 3.0% Est",
+          "metric": "inflation_headline",
+          "basis": "numeric"
+        }
+      ],
+      "caveat": "기사에 근거한 단기 영향 추정 · 선반영·실제 가격 반응 미확인"
+    }
+  },
+  {
+    "id": "4",
+    "title": "Acme EPS $1.001 vs $1.00 Est",
+    "entities": [
+      {
+        "symbol": "ACME"
+      }
+    ],
+    "marketImpact": {
+      "version": 2,
+      "method": "event_rules",
+      "policy": "balanced-v1",
+      "basisTitle": "Acme EPS $1.001 vs $1.00 Est",
+      "direction": "neutral",
+      "scope": "company",
+      "targets": [
+        "ACME"
+      ],
+      "reason": "EPS 예상 부합 또는 차이 미미 → 뚜렷한 방향성 변화 없음",
+      "evidence": [
+        {
+          "rule": "earnings_inline",
+          "direction": "neutral",
+          "scope": "company",
+          "reason": "EPS 예상 부합 또는 차이 미미 → 뚜렷한 방향성 변화 없음",
+          "quote": "EPS $1.001 vs $1.00 Est",
+          "metric": "earnings_eps",
+          "basis": "numeric"
         }
       ],
       "caveat": "기사에 근거한 단기 영향 추정 · 선반영·실제 가격 반응 미확인"

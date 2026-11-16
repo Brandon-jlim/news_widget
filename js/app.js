@@ -561,6 +561,8 @@
     const focusedCard = document.activeElement?.closest?.('.news-card');
     const focusedKey = focusedCard?.dataset.key;
     const focusedPin = document.activeElement?.classList?.contains('news-card__action-btn');
+    const focusedSentiment = document.activeElement?.classList?.contains('sentiment-badge');
+    const focusedTime = document.activeElement?.classList?.contains('meta-chip--time');
     newsListEl.innerHTML = '';
 
     items.forEach((item, index) => {
@@ -589,8 +591,9 @@
         const pinButton = document.createElement('button');
         pinButton.type = 'button';
         pinButton.className = `news-card__action-btn ${isPinned ? 'is-active' : ''}`.trim();
-        pinButton.textContent = isPinned ? '고정됨' : '고정';
+        pinButton.textContent = '고정';
         pinButton.setAttribute('aria-pressed', String(isPinned));
+        pinButton.setAttribute('aria-label', isPinned ? '기사 고정 해제' : '기사 고정');
         pinButton.title = isPinned ? '고정 해제' : '이 카드를 맨 위에 고정';
         pinButton.addEventListener('click', (event) => {
           event.preventDefault();
@@ -605,35 +608,43 @@
       const meta = document.createElement('div');
       meta.className = 'news-card__meta';
       const impact = runtimeConfig.sentiment?.enabled !== false ? window.NewsMarketImpact.describe(item) : null;
-      if (item.source) meta.appendChild(makeChip(item.source, 'meta-chip--source'));
-      const typeChip = makeChip(newsType.label, `meta-chip--type meta-chip--${newsType.kind}`);
-      typeChip.title = newsType.basis;
-      meta.appendChild(typeChip);
-      const age = item.publishedAt ? Date.now() - new Date(item.publishedAt).getTime() : Infinity;
-      if (age >= 0 && age < 300_000) meta.appendChild(makeChip('최근 5분', 'meta-chip--fresh'));
       if (impact) {
-        const chip = makeChip(impact.label, `meta-chip--sentiment meta-chip--sentiment-${impact.impact.direction}`);
-        chip.title = impact.detail;
-        meta.appendChild(chip);
+        const badge = document.createElement('span');
+        badge.className = `sentiment-badge sentiment-badge--${impact.impact.direction}`;
+        badge.textContent = impact.badge;
+        badge.title = impact.detail;
+        badge.tabIndex = 0;
+        badge.setAttribute('aria-label', impact.detail);
+        badge.addEventListener('click', event => event.stopPropagation());
+        badge.addEventListener('keydown', event => event.stopPropagation());
+        meta.appendChild(badge);
+        card.dataset.sentiment = impact.impact.direction;
       }
-      const timeChip = makeChip(formatPublishedLabel(item), 'meta-chip--time');
-      if (item.publishedAt) timeChip.title = window.NewsContext.publication(item).detail;
+      const typeChip = makeChip(newsType.label, `meta-chip--type meta-chip--${newsType.kind}`);
+      typeChip.title = [newsType.basis, item.category].filter(Boolean).join(' · ');
+      meta.appendChild(typeChip);
+      if (item.category && item.category !== newsType.label) {
+        const topicChip = makeChip(item.category, 'meta-chip--topic');
+        topicChip.title = `주제: ${item.category}`;
+        meta.appendChild(topicChip);
+      }
+      const age = item.publishedAt ? Date.now() - new Date(item.publishedAt).getTime() : Infinity;
+      const recent = age >= 0 && age < 300_000;
+      const timeChip = makeChip(formatPublishedLabel(item), `meta-chip--time${recent ? ' meta-chip--recent' : ''}`);
+      const publication = window.NewsContext.publication(item);
+      timeChip.title = [item.source ? `출처: ${item.source}` : '', publication.text, publication.detail].filter(Boolean).join('\n');
+      timeChip.tabIndex = 0;
+      timeChip.setAttribute('aria-label', timeChip.title);
+      timeChip.addEventListener('click', event => event.stopPropagation());
+      timeChip.addEventListener('keydown', event => event.stopPropagation());
       meta.appendChild(timeChip);
 
-      if (isPinned) {
-        meta.appendChild(makeChip(isLivePinned ? 'PIN' : 'PIN 보존', 'meta-chip--pin'));
-      }
-
-      if (item.category) {
-        meta.appendChild(makeChip(item.category));
-      }
-
-      if (isStale) {
-        meta.appendChild(makeChip('갱신 확인 필요'));
-      }
-      if (item.translationStatus === 'failed') meta.appendChild(makeChip('원문'));
-      if (item.translationStatus === 'review') meta.appendChild(makeChip('번역 확인 · 원문'));
-      if (item.translationStatus === 'pending') meta.appendChild(makeChip('번역 중'));
+      const notices = [];
+      if (isPinned && !isLivePinned) notices.push('보존된 고정 기사');
+      if (isStale) notices.push('갱신 확인 필요');
+      if (item.translationStatus === 'failed') notices.push('원문');
+      if (item.translationStatus === 'review') notices.push('번역 확인 · 원문');
+      if (item.translationStatus === 'pending') notices.push('번역 중');
 
       const titleText = resolveDisplayTitle(item);
       let titleNode;
@@ -682,25 +693,27 @@
 
       card.appendChild(meta);
       card.appendChild(titleNode);
-      if (impact) {
-        const explanation = document.createElement('p');
-        explanation.className = 'news-card__impact';
-        explanation.textContent = impact.summary;
-        explanation.title = impact.detail;
-        card.appendChild(explanation);
+      const footer = document.createElement('div');
+      footer.className = 'news-card__footer';
+      const published = document.createElement('p');
+      published.className = 'news-card__publication';
+      published.textContent = publication.primaryText;
+      published.title = timeChip.title;
+      footer.appendChild(published);
+      if (notices.length) {
+        const note = document.createElement('p');
+        note.className = 'news-card__notice';
+        note.textContent = notices.join(' · ');
+        note.title = note.textContent;
+        footer.appendChild(note);
       }
-      const publication = window.NewsContext.publication(item);
-      const publicationEl = document.createElement('p');
-      publicationEl.className = 'news-card__publication';
-      publicationEl.textContent = publication.text;
-      publicationEl.title = publication.detail;
-      card.appendChild(publicationEl);
+      card.appendChild(footer);
       newsListEl.appendChild(card);
     });
     if (state.heldItems) newsListEl.scrollTop = scrollPosition;
     if (focusedKey) {
       const card = Array.from(newsListEl.children).find(node => node.dataset.key === focusedKey);
-      const target = focusedPin ? card?.querySelector('.news-card__action-btn') : card?.querySelector('.news-card__title-link');
+      const target = focusedPin ? card?.querySelector('.news-card__action-btn') : focusedSentiment ? card?.querySelector('.sentiment-badge') : focusedTime ? card?.querySelector('.meta-chip--time') : card?.querySelector('.news-card__title-link');
       target?.focus({preventScroll: true});
     }
   }
@@ -776,7 +789,7 @@
     const publishedDate = item ? item.publishedDate : '';
 
     if (!publishedAt && publishedDate) {
-      return formatDateOnlyLabel(publishedDate);
+      return '시각 미제공';
     }
 
     if (!publishedAt) {
@@ -785,7 +798,7 @@
 
     const date = new Date(publishedAt);
     if (Number.isNaN(date.getTime())) {
-      return publishedDate ? formatDateOnlyLabel(publishedDate) : '시간 미상';
+      return publishedDate ? '시각 미제공' : '시간 미상';
     }
 
     const diffMs = Date.now() - date.getTime();
@@ -806,20 +819,7 @@
       return `${Math.max(1, Math.floor(diffMs / hour))}시간 전`;
     }
 
-    return formatAbsoluteDateLabel(date);
-  }
-
-  function formatDateOnlyLabel(input) {
-    const text = String(input || '').trim();
-    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (!match) {
-      return '시간 미상';
-    }
-
-    const [, year, month, day] = match;
-    const currentYear = getTimeZonePart(new Date(), 'year');
-    const label = `${Number(month)}.${Number(day)}`;
-    return year === currentYear ? label : `${year}.${label}`;
+    return `${Math.floor(diffMs / day)}일 전`;
   }
 
   function formatAbsoluteDateLabel(date) {
@@ -1150,6 +1150,10 @@
       refreshMs: refreshMs || baseConfig.refreshMs,
       activeTabKey,
       tabs,
+      sentiment: {
+        ...(baseConfig.sentiment || {}),
+        ...(typeof serverConfig.sentiment?.enabled === 'boolean' ? {enabled: serverConfig.sentiment.enabled} : {}),
+      },
       pinning: {
         ...(baseConfig.pinning || {}),
         ...(startEditMode ? { startInEditMode: true } : {}),

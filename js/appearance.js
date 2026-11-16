@@ -80,11 +80,12 @@
       card,'card-top':selected,'card-hover':hover,'strong-line':mix(bg,point,0.5),
       'source-text':readable(mix(text,point,0.4),surfaces),'scroll-thumb':mix(bg,ink,0.3),
       'skeleton':mix(bg,ink,0.08),'brand-soft':mix(point,ink,0.3)};
-    for(const [name,color] of Object.entries({ok:'#31b77f',warn:'#b57d22',error:'#e25565',positive:'#32b980',negative:'#e25565',mixed:'#c29336',fresh:'#528bd1',type:'#8895b0',breaking:'#e76f89',important:'#c59942',economic:'#43aa91',earnings:'#8c80d9',pin:'#bf9b40'})) {
-      const badge=surface(mix(bg,color,dark?0.18:0.12));
+    for(const [name,color] of Object.entries({ok:'#31b77f',warn:'#b57d22',error:'#e25565',positive:'#32b980',negative:'#e25565',mixed:'#c29336',neutral:'#8895a8',fresh:'#528bd1',type:'#8895b0',breaking:'#e76f89',important:'#c59942',economic:'#43aa91',earnings:'#8c80d9',pin:'#bf9b40'})) {
+      const directional=name==='positive'||name==='negative';
+      const badge=directional ? (dark ? mix(bg,color,0.65) : mix(color,'#000000',0.35)) : surface(mix(bg,color,dark?0.18:0.12));
       vars[name]=readable(color,surfaces);
       vars[`${name}-bg`]=badge;
-      vars[`${name}-text`]=readable(color,[badge]);
+      vars[`${name}-text`]=readable(directional?'#ffffff':color,[badge]);
     }
     vars['pin-border']=mix(bg,vars.pin,0.5);
     return {vars,dark};

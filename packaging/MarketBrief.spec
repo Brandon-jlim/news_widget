@@ -4,6 +4,7 @@ from pathlib import Path
 root = Path(SPECPATH).parent
 assets = [(str(root / name), '.') for name in ['index.html', 'styles.css', 'translation-policy.json', 'VERSION']]
 assets += [(str(root / 'js'), 'js'), (str(root / 'tools/ko_terms.sample.json'), 'tools')]
+assets += [(str(root / 'fonts'), 'fonts')]
 a = Analysis([str(root / 'desktop_entry.py')], pathex=[str(root)], binaries=[], datas=assets,
              hiddenimports=[], hookspath=[], runtime_hooks=[], excludes=[], noarchive=False)
 pyz = PYZ(a.pure)
