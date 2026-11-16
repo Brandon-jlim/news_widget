@@ -188,10 +188,20 @@ def self_test(report: Path, port: int, stay_open: bool) -> int:
     result = {'status': 'failed'}
     try:
         session.start()
-        for name in ['/', '/styles.css', '/js/app.js', '/js/article-reader.js', '/widget-runtime.js']:
+        for name in ['/', '/styles.css', '/js/app.js', '/js/article-reader.js',
+                     '/js/typography.js', '/fonts/fonts.css', '/widget-runtime.js']:
             with urlopen(f'http://127.0.0.1:{port}' + name, timeout=5) as response:
                 assert response.status == 200
                 assert response.read()
+        for name, mime, signature in [
+                ('PretendardVariable.woff2', 'font/woff2', b'wOF2'),
+                ('InterVariable.woff2', 'font/woff2', b'wOF2'),
+                ('IBMPlexMono-Medium.woff2', 'font/woff2', b'wOF2'),
+                ('NotoSansKR-VF.ttf', 'font/ttf', b'\x00\x01\x00\x00')]:
+            with urlopen(f'http://127.0.0.1:{port}/fonts/' + name, timeout=5) as response:
+                assert response.status == 200
+                assert response.headers.get_content_type() == mime
+                assert response.read().startswith(signature)
         for name in ['/keys/massive_api_key.txt', '/keys/deepl_api_key.txt', '/data/.desktop.lock', '/logs/relay.log']:
             try:
                 urlopen(f'http://127.0.0.1:{port}' + name, timeout=5)
@@ -215,6 +225,7 @@ def self_test(report: Path, port: int, stay_open: bool) -> int:
                   'version': (RESOURCE_ROOT / 'VERSION').read_text().strip(),
                   'pid': os.getpid(), 'serverPid': session.server.pid, 'relayPid': session.relay.pid,
                   'port': port, 'privateFilesBlocked': True, 'tkAndSslLoaded': True,
+                  'bundledFontsServed': True,
                   'offline': True, 'resourceRoot': str(RESOURCE_ROOT), 'dataRoot': str(DATA_ROOT)}
         atomic_write_json(report, result)
         if stay_open:

@@ -40,6 +40,10 @@ def regular_file(path: Path) -> bool:
 
 
 class WidgetHandler(SimpleHTTPRequestHandler):
+    # Windows may not register webfont types in its system MIME database.
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
+                      ".woff2": "font/woff2", ".ttf": "font/ttf"}
+
     def __init__(self, *args, root: Path, feeds: dict[str, Path], runtime: dict, **kwargs):
         self.root = root.resolve()
         self.routes = {"/" + name: self.root / name for name in ASSETS}
