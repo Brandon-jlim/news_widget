@@ -20,37 +20,11 @@ from urllib.request import urlopen
 from .app_paths import DATA_ROOT, RESOURCE_ROOT
 from . import run_overlay
 from .storage import atomic_write_json
+from .instance_lock import InstanceLock
 
 
 class StartupError(Exception):
     pass
-
-
-class InstanceLock:
-    """OS-managed file lock; crashes do not leave a stale PID lock behind."""
-    def __init__(self, path: Path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.handle = path.open('a+b')
-        self.handle.seek(0, 2)
-        if self.handle.tell() == 0:
-            self.handle.write(b'0')
-            self.handle.flush()
-        self.handle.seek(0)
-        try:
-            if os.name == 'nt':
-                import msvcrt
-                msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            self.handle.close()
-            self.handle = None
-
-    def close(self):
-        if self.handle:
-            self.handle.close()
-            self.handle = None
 
 
 def watch_parent() -> None:
@@ -173,7 +147,7 @@ class DesktopSession:
             log.close()
 
 
-def self_test(report: Path, port: int, stay_open: bool) -> int:
+def self_test(report: Path, port: int, stay_open: bool, update_archive: Path | None = None) -> int:
     """Exercise the real frozen EXE without keys or requests to paid services."""
     import ssl
     import tkinter as tk
@@ -228,7 +202,17 @@ def self_test(report: Path, port: int, stay_open: bool) -> int:
                   'bundledFontsServed': True,
                   'offline': True, 'resourceRoot': str(RESOURCE_ROOT), 'dataRoot': str(DATA_ROOT)}
         atomic_write_json(report, result)
-        if stay_open:
+        if update_archive:
+            from zipfile import ZipFile
+            from .updater import new_job, unpack_release, launch_helper
+            with ZipFile(update_archive) as archive:
+                name = next(n for n in archive.namelist() if n.count('/') == 1 and n.endswith('/VERSION.txt'))
+                version = archive.read(name).decode().strip()
+            job = new_job(DATA_ROOT)
+            unpack_release(update_archive, job / 'incoming', version)
+            launch_helper(job, DATA_ROOT, version, port, test_restart=True)
+            result['updateJob'] = str(job)
+        elif stay_open:
             while True:
                 time.sleep(1)
     finally:
@@ -243,7 +227,7 @@ def run_gui(port: int, test_report: Path | None = None) -> int:
     from tkinter import ttk
     root = tk.Tk()
     root.title('Market Brief · 뉴스 위젯')
-    root.geometry('500x340')
+    root.geometry('520x440')
     root.resizable(False, False)
     style = ttk.Style(root)
     style.theme_use('clam')
@@ -269,10 +253,29 @@ def run_gui(port: int, test_report: Path | None = None) -> int:
     open_button.pack(side='left')
     ttk.Button(controls, text='API 키 폴더', command=lambda: open_external(str(DATA_ROOT / 'keys'))).pack(side='left', padx=7)
     def close():
+        if not update_controls.can_close():
+            return
         root.destroy()
         session.close()
     ttk.Button(controls, text='종료', command=close).pack(side='right')
     root.protocol('WM_DELETE_WINDOW', close)
+    update_frame = ttk.Frame(frame)
+    update_frame.pack(fill='x', pady=(18, 0))
+    from .update_ui import UpdateControls
+    def update_handoff():
+        session.close()
+        root.destroy()
+    update_controls = UpdateControls(root, update_frame, port, update_handoff)
+    result_file = DATA_ROOT / 'data/update-result.json'
+    if result_file.is_file():
+        try:
+            result = json.loads(result_file.read_text(encoding='utf-8'))
+            if result.get('status') == 'installed':
+                update_controls.status.set(f'v{update_controls.current} 업데이트 완료 · 확인 버튼을 누를 때만 연결합니다.')
+            elif result.get('message'):
+                update_controls.status.set(result['message'])
+        except (OSError, ValueError):
+            pass
     def launch():
         try:
             session.start()
@@ -290,7 +293,10 @@ def run_gui(port: int, test_report: Path | None = None) -> int:
                 opened[0] = True
                 if test_report:
                     atomic_write_json(test_report, {'status': 'ready', 'window': root.winfo_id(),
-                                      'pid': os.getpid(), 'serverPid': session.server.pid, 'relayPid': session.relay.pid})
+                                      'pid': os.getpid(), 'serverPid': session.server.pid, 'relayPid': session.relay.pid,
+                                      'updateButtonText': update_controls.button.cget('text'),
+                                      'updateButtonVisible': bool(update_controls.button.winfo_ismapped()),
+                                      'updateIdleAtStartup': update_controls.busy is None})
                 else:
                     open_widget()
         if opened[0] and any(proc.poll() is not None for proc in [session.server, session.relay]):
@@ -311,7 +317,17 @@ def main(argv=None) -> int:
     parser.add_argument('--self-test', type=Path)
     parser.add_argument('--test-stay-open', action='store_true')
     parser.add_argument('--ui-test', type=Path)
+    parser.add_argument('--self-test-update', type=Path)
     args = parser.parse_args(argv)
+    update_guard = InstanceLock(DATA_ROOT / 'data/.update.lock')
+    if not update_guard.handle:
+        if args.self_test:
+            atomic_write_json(args.self_test, {'status': 'updating'})
+        else:
+            from tkinter import messagebox
+            messagebox.showinfo('Market Brief 업데이트', '업데이트 중입니다. 완료되면 앱이 다시 열립니다.')
+        return 0
+    update_guard.close()
     lock = InstanceLock(DATA_ROOT / 'data/.desktop.lock')
     if not lock.handle:
         if args.self_test:
@@ -321,7 +337,7 @@ def main(argv=None) -> int:
         return 0
     try:
         if args.self_test:
-            return self_test(args.self_test, args.port, args.test_stay_open)
+            return self_test(args.self_test, args.port, args.test_stay_open, args.self_test_update)
         return run_gui(args.port, args.ui_test)
     finally:
         lock.close()

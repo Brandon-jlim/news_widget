@@ -109,6 +109,7 @@ def main():
         gui = subprocess.Popen([executable, '--ui-test', str(ui_report), '--port', str(free_port())], cwd=directory, env=env)
         try:
             ui = wait_report(ui_report, gui)
+            assert ui['updateButtonText'] == '업데이트 확인' and ui['updateButtonVisible'] and ui['updateIdleAtStartup']
             user = ctypes.WinDLL('user32', use_last_error=True)
             user.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
             user.GetAncestor.restype = wintypes.HWND
@@ -118,6 +119,7 @@ def main():
             assert gui.wait(timeout=15) == 0
             assert not is_alive(ui['serverPid']) and not is_alive(ui['relayPid'])
             summary['guiWindowCloseStopsCollection'] = True
+            summary['manualUpdateButtonVisible'] = True
         finally:
             if gui.poll() is None:
                 gui.kill()

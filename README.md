@@ -1,6 +1,6 @@
 # 미국 증시 뉴스 위젯
 
-현재 버전: **v1.10.1 — 호재·악재 배지 강조**. 버전별 변경 사항은 [CHANGELOG.md](CHANGELOG.md)에 기록합니다.
+현재 버전: **v1.11.0 — 버튼으로 확인·설치하는 수동 업데이트**. 버전별 변경 사항은 [CHANGELOG.md](CHANGELOG.md)에 기록합니다.
 
 방송 진행자가 별도 로컬 화면에서 미국 증시 관련 뉴스를 확인하는 위젯입니다. **Massive의 Benzinga News REST API**를 주력으로 사용하고 연준·BLS·BEA·SEC·EIA 공식 발표, CNBC·PR Newswire RSS를 함께 모읍니다. Marketaux와 Benzinga 직접 스트림도 선택적으로 지원합니다. 한국어 제목은 DeepL로 번역합니다. 현재 사용 범위는 시청자에게 송출하지 않는 진행자 전용 열람입니다.
 
@@ -12,6 +12,14 @@ API 키는 EXE 옆 `keys/massive_api_key.txt`, `keys/deepl_api_key.txt`에서 �
 
 `_internal` 폴더는 Python·Tcl/Tk·앱 파일을 포함하므로 EXE와 같이 유지합니다. 뉴스·번역 캐시와 진단 로그는 EXE 옆 `data`, `logs`에 저장됩니다. 바탕 화면·문서처럼 쓰기 가능한 위치에 압축을 풀어야 하며 인터넷 연결이 필요합니다. 중복 실행은 추가 수집기를 만들지 않고 기존 위젯을 엽니다. 실행 창이 강제로 종료돼도 백그라운드 수집기가 남지 않도록 부모 프로세스를 감시합니다.
 
+### 버튼으로 업데이트
+
+Windows 실행 창에서 **업데이트 확인**을 누르면 GitHub의 최신 정식 배포 버전을 확인합니다. 새 버전이 있을 때 설치 확인 창에서 **예**를 선택하면 ZIP을 내려받아 검증하고 앱을 종료·교체·재실행합니다. Git 설치나 GitHub 로그인은 필요 없습니다. **앱 시작·시간 경과에 따른 자동 확인, 자동 다운로드, 자동 설치는 하지 않습니다.** 개발용 사전 릴리스와 현재보다 오래된 버전은 설치하지 않습니다.
+
+API 키 TXT, 뉴스·번역 데이터, 로그와 사용자 파일을 유지하고 기존 주소·포트로 다시 열어 같은 브라우저의 화면 설정을 이어 씁니다. 다운로드·검증 실패 시 실행 중인 앱을 유지하며, 파일 교체 도중 실패하면 기존 앱 파일 복원을 시도합니다. 직전 앱 파일은 `data/.updates/<작업번호>/backup`에 보관하고 다음 업데이트를 시작할 때 이전 완료 작업을 정리합니다. 앱 폴더는 쓰기 가능해야 하며 업데이트 준비가 끝날 때까지 실행 창을 닫지 마세요.
+
+**v1.10.1 이하에는 이 버튼이 없으므로 v1.11.0 ZIP을 한 번 전달·교체해야 합니다.** 이후에는 정식 버전을 배포하고 사용자에게 확인 버튼을 누르도록 안내하면 됩니다. ZIP으로 직접 교체하는 방법은 함께 제공하는 `처음 읽어주세요.txt`에 있습니다.
+
 ### Windows 배포본 빌드
 
 [PyInstaller](https://pyinstaller.org/en/stable/operating-mode.html)는 대상 OS에서 빌드해야 합니다. Windows Python 환경에서 다음을 실행하거나 `.github/workflows/windows-portable.yml`을 사용합니다.
@@ -20,14 +28,17 @@ API 키는 EXE 옆 `keys/massive_api_key.txt`, `keys/deepl_api_key.txt`에서 �
 python -m pip install -r packaging/requirements-build.txt
 python packaging/build_windows.py
 python packaging/smoke_windows.py
+python packaging/smoke_update_windows.py
 ```
 
-빌드 결과는 `dist/MarketBrief-v<버전>-Windows-x64.zip`이며 개인 키·뉴스 캐시·로그를 포함하지 않습니다. 자동 검증은 EXE를 한글·공백 경로로 옮기고 Python을 PATH에서 제외한 상태에서 시작·종료, 자식 프로세스 정리, 중복 실행 방지, 키 파일 HTTP 차단과 실제 GUI 창 닫기를 확인합니다. 유료 뉴스·번역 서비스에는 요청하지 않습니다. Windows Actions 빌드는 키가 없는 ZIP과 검증 결과만 빌드용 사전 릴리스에 게시합니다.
+빌드 결과는 `dist/MarketBrief-v<버전>-Windows-x64.zip`이며 개인 키·뉴스 캐시·로그를 포함하지 않습니다. 자동 검증은 EXE를 한글·공백 경로로 옮기고 Python을 PATH에서 제외한 상태에서 시작·종료, 자식 프로세스 정리, 중복 실행 방지, 키 파일 HTTP 차단과 실제 GUI 창 닫기를 확인합니다. 업데이트 검증은 실제 EXE를 로컬 테스트 ZIP으로 교체하고 새 버전으로 재시작, 키·데이터 보존, 동일 포트 재사용을 확인합니다. 유료 뉴스·번역 서비스에는 요청하지 않습니다.
+
+`build/windows` 브랜치 빌드는 키가 없는 ZIP·SHA-256·검증 결과를 사전 릴리스에 게시합니다. 검증 후 `VERSION`과 같은 `v<버전>` 태그를 push하면 다시 빌드·검증해 정식 GitHub Release로 게시하며 **그때부터 앱의 업데이트 확인에서 보입니다.** 소스 코드 push만으로 사용자 앱을 바꾸지 않습니다. 공개한 태그는 변경하지 않고 다음 버전 번호로 배포합니다.
 
 승인받은 키를 포함한 전달본은 공개 빌드를 내려받은 후 **로컬에서만** 만듭니다. 출력 파일은 Git에서 제외됩니다.
 
 ```bash
-python3 packaging/prepare_delivery.py --archive dist/MarketBrief-v1.10.1-Windows-x64.zip --keys keys --output delivery/MarketBrief-v1.10.1-Windows-x64-private.zip
+python3 packaging/prepare_delivery.py --archive dist/MarketBrief-v1.11.0-Windows-x64.zip --keys keys --output delivery/MarketBrief-v1.11.0-Windows-x64-private.zip
 ```
 
 ## 소스에서 실행

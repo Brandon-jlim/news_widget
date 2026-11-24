@@ -2,6 +2,7 @@ name: Windows portable build
 on:
   push:
     branches: [build/windows]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -34,12 +35,15 @@ jobs:
       - name: Build without private keys
         shell: pwsh
         run: |
+          if ("${{ github.ref }}".StartsWith('refs/tags/v') -and "${{ github.ref_name }}" -ne "v$((Get-Content VERSION).Trim())") { throw 'Release tag and VERSION differ' }
           python -m pip install -r packaging/requirements-build.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python packaging/build_windows.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test packaged executable without Python on PATH
         run: python packaging/smoke_windows.py
+      - name: Test manual update and restart with preserved keys
+        run: python packaging/smoke_update_windows.py
       - uses: actions/upload-artifact@v4
         with:
           name: MarketBrief-Windows-x64
@@ -47,12 +51,18 @@ jobs:
             dist/*.zip
             dist/*.sha256
             dist/windows-smoke-report.json
+            dist/windows-update-report.json
       - name: Publish key-free build for download
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "windows-build-${{ github.run_id }}"
-          $notes = "Windows x64 portable build. API keys are NOT included. Extract the entire ZIP, fill keys/*.txt and run MarketBrief.exe. Packaged EXE smoke tests are included."
+          $stable = "${{ github.ref }}".StartsWith('refs/tags/v')
+          $tag = if ($stable) { "${{ github.ref_name }}" } else { "windows-build-${{ github.run_id }}" }
+          $notes = "Windows x64 portable build. API keys are NOT included. Extract the entire ZIP, fill keys/*.txt and run MarketBrief.exe. Updates are checked only when you click the update button and installed only after confirmation. Packaged EXE and update/restart smoke tests are included."
           $assets = Get-ChildItem dist -File | Where-Object { $_.Extension -in '.zip', '.sha256', '.json' } | ForEach-Object { $_.FullName }
-          gh release create $tag @assets --target "${{ github.sha }}" --prerelease --title "Windows portable build ${{ github.run_id }}" --notes $notes
+          if ($stable) {
+            gh release create $tag @assets --verify-tag --latest --title "Market Brief $tag" --notes $notes
+          } else {
+            gh release create $tag @assets --target "${{ github.sha }}" --prerelease --title "Windows portable build ${{ github.run_id }}" --notes $notes
+          }

@@ -8,6 +8,9 @@ from tools.app_paths import DATA_ROOT
 
 def main():
     args = sys.argv[1:]
+    if args and args[0] == '--internal-update':
+        from tools.updater import helper_main
+        return helper_main(Path(args[1]))
     from tools.desktop import watch_parent, main as desktop_main
     if args and args[0] in {'--internal-server', '--internal-relay'}:
         watch_parent()
